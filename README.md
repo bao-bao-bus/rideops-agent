@@ -27,6 +27,29 @@
 - 无足够证据时拒答
 - `POST /api/rag/search` 检索接口
 
+## RAG 评估集与 Mock 基线
+
+评估集位于 `evals/rag_eval.jsonl`，当前包含 37 条带标注问题，覆盖事故计费、车辆损坏、人员受伤、事故工单、长租需求、库存、续租/退租、无关问题和知识库外问题。评估脚本位于 `evals/run_rag_eval.py`。
+
+运行命令：
+
+```bash
+python evals/run_rag_eval.py --output evals/mock-baseline.json
+```
+
+当前本地 Mock RAG 基线（`min_score=0.18`，实际运行结果）：
+
+| 指标 | 结果 |
+| --- | ---: |
+| Hit@1 | 0.8750 |
+| Hit@3 | 1.0000 |
+| Hit@5 | 1.0000 |
+| MRR | 0.9306 |
+| 拒答正确率 | 0.7838 |
+| Skill Routing Accuracy | 0.8378 |
+
+这些数字仅用于后续比较 Mock、BM25、Vector、Hybrid+RRF 和 Reranker 版本，不代表生产能力，也不作为简历指标。
+
 当前尚未实现：MCP、LangGraph、HITL checkpoint、可靠执行、SSE，以及真实模型或企业系统连接。RAG 当前使用本地 Mock 模式；前端中的相关流程仍是确定性演示状态机。
 
 ## 目录结构
@@ -83,8 +106,8 @@ curl -X POST http://127.0.0.1:8000/api/rag/search \
 
 ## 下一阶段
 
-下一轮实现 MCP 业务工具：只读/写入工具契约、审批约束、合成数据、错误分类和幂等键。只有实际运行评估后，才会把指标写入 README 或简历。
+下一轮先升级真实 RAG：保留统一接口，增加真实 Embedding Adapter、持久化向量索引、BM25 和 RRF 融合；完成评估对比后，再进入持久化业务数据库和 MCP。
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；设计可扩展的 Skill Registry 与关键词路由器，实现 Skill 元数据启动扫描、命中后的渐进式 `SKILL.md` 加载；进一步实现本地 Mock 优先的 RAG 检索链路，支持 Markdown 政策解析、Hybrid Search、可替换 Embedding 接口、证据引用和无证据拒答，并使用 pytest 覆盖 26 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；设计可扩展的 Skill Registry 与关键词路由器，实现 Skill 元数据启动扫描、命中后的渐进式 `SKILL.md` 加载；进一步实现本地 Mock 优先的 RAG 检索链路，支持 Markdown 政策解析、Hybrid Search、可替换 Embedding 接口、证据引用和无证据拒答，并使用 pytest 覆盖 27 个测试场景。
