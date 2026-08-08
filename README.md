@@ -1,53 +1,90 @@
 # RideOps Agent
 
-> 面向共享出行业务的 Agent 应用原型：RAG 证据、MCP 业务工具计划、LangGraph 长任务、HITL 审批与可靠执行。
+面向共享出行业务的 Agent 应用开发实习项目。当前仓库保留原有 Next.js 前端交互原型，并新增了第一轮 Python 后端基础与 Agent Skills 能力。
 
-[在线体验原型](https://rideops-agent.mikelcarus6908.chatgpt.site)
+## 当前完成状态
 
-## 为什么做这个项目
+本轮已完成阶段一和阶段二：
 
-传统 RAG 客服通常只能回答知识问题，无法安全完成暂停计费、停用故障车辆、创建事故工单等业务动作。RideOps Agent 将事故处理建模为一个受约束的长任务：先识别意图并加载 Skill，再检索政策证据、查询业务状态、生成执行计划，最后在人类审批后执行写操作并回读验证结果。
+- FastAPI 应用骨架与 `GET /health`
+- Pydantic v2 领域模型：订单、车辆、库存、事故工单
+- 本地合成业务数据仓库，不连接真实企业数据库
+- 两个 Skill：`accident-handling`、`long-rental-planning`
+- Skill Registry：启动时只扫描名称和描述
+- Skill Router：基于业务关键词路由，命中后再加载完整 `SKILL.md`
+- references 和 templates 按需读取
+- 10 条以上 Skill 路由测试用例
+- 原有 Next.js 前端原型未改动
 
-## 当前初版
+阶段三已完成：
 
-当前仓库包含可运行的 Next.js 交互原型，用合成数据演示完整事故处理链路：
+- 合成事故处理与长租政策文档
+- Markdown 文档解析与按章节 Chunk 切分
+- 可替换的 Embedding 接口与本地确定性 Mock Embedding
+- 关键词检索、向量检索和 Hybrid Search
+- 可选本地 Rerank
+- `document_id`、标题、章节、内容、分数和来源引用
+- 无足够证据时拒答
+- `POST /api/rag/search` 检索接口
 
-- Skill 路由与渐进式加载状态
-- RAG 政策证据和订单状态展示
-- 三个 MCP 写工具的结构化执行计划
-- HITL 批准 / 拒绝交互
-- 幂等写入、结果回读和安全终止状态
-- 桌面端与移动端响应式界面
+当前尚未实现：MCP、LangGraph、HITL checkpoint、可靠执行、SSE，以及真实模型或企业系统连接。RAG 当前使用本地 Mock 模式；前端中的相关流程仍是确定性演示状态机。
 
-> 当前按钮驱动的是确定性前端状态机，不会调用真实业务系统。后端能力将在后续里程碑逐步接入，并以测试和评估结果为准更新项目描述。
+## 目录结构
 
-## 本地运行
+```text
+app/                         # 原有 Next.js 前端
+backend/
+  src/rideops/
+    api/                     # FastAPI 接口
+    domain/                  # Pydantic 领域模型
+    repositories/            # 合成数据仓库
+    skills/                  # Registry 与 Router
+    rag/                     # 文档、Chunk、Embedding、Hybrid Search
+skills/                     # 可按需加载的 SKILL.md
+docs/policies/               # 合成政策文档
+```
+
+## 启动后端
+
+```bash
+cd backend
+python -m venv .venv
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[test]"
+uvicorn rideops.api.app:app --reload
+```
+
+访问 `http://127.0.0.1:8000/health`。默认是 mock 模式，不需要 API Key。
+
+## 运行测试
+
+```bash
+cd backend
+pytest
+```
+
+## 前端
 
 ```bash
 npm install
 npm run dev
 ```
 
-访问 `http://localhost:3000`。
-
-生产构建：
+## RAG 检索示例
 
 ```bash
-npm run build
-npm start
+curl -X POST http://127.0.0.1:8000/api/rag/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"车辆发生碰撞后应该怎么处理"}'
 ```
 
-## 计划中的工程化升级
+返回的每条证据包含 `document_id`、`title`、`section`、`content`、`score` 和 `source`。没有足够证据时返回 `answerable: false`，不会强行生成答案。
 
-- [x] 可交互 Agent 工作台与 HITL 原型
-- [ ] Agent Skills 注册、渐进加载与路由评估
-- [ ] 带引用和拒答策略的 RAG 检索
-- [ ] FastMCP 读写工具及 Pydantic 契约
-- [ ] LangGraph checkpoint、interrupt 与恢复执行
-- [ ] FastAPI + SSE 运行状态接口
-- [ ] 幂等键、超时重试、错误分类与执行回读
-- [ ] 端到端评估集和可复现实验报告
+## 下一阶段
 
-## 简历使用原则
+下一轮实现 MCP 业务工具：只读/写入工具契约、审批约束、合成数据、错误分类和幂等键。只有实际运行评估后，才会把指标写入 README 或简历。
 
-只把已完成并能在仓库中验证的能力写进简历。当前可以描述“完成交互式 Agent 工作台和 HITL 流程原型”；MCP、LangGraph、RAG 后端和量化指标应在对应代码与评估完成后再写。
+## 简历表述（基于当前代码）
+
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；设计可扩展的 Skill Registry 与关键词路由器，实现 Skill 元数据启动扫描、命中后的渐进式 `SKILL.md` 加载；进一步实现本地 Mock 优先的 RAG 检索链路，支持 Markdown 政策解析、Hybrid Search、可替换 Embedding 接口、证据引用和无证据拒答，并使用 pytest 覆盖 26 个测试场景。
