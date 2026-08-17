@@ -54,16 +54,18 @@ class AmapMcpProvider:
             async with ClientSession(read_stream, write_stream) as session:
                 await asyncio.wait_for(session.initialize(), timeout=self.timeout_seconds)
                 tools = await asyncio.wait_for(session.list_tools(), timeout=self.timeout_seconds)
-                tool = self._select_tool(tools.tools, "bicycling_by_address")
-                result = await asyncio.wait_for(
-                    session.call_tool(
-                        tool.name,
-                        {
-                            "origin_address": origin,
-                            "destination_address": destination,
-                        },
-                    ),
-                    timeout=self.timeout_seconds,
+                geo_tool = self._select_tool(tools.tools, "maps_geo")
+                route_tool = self._select_tool(tools.tools, "maps_direction_bicycling")
+                origin_result = await self._call_tool(session, geo_tool.name, {"address": origin})
+                destination_result = await self._call_tool(session, geo_tool.name, {"address": destination})
+                origin_location = self._extract_location(self._result_payload(origin_result))
+                destination_location = self._extract_location(self._result_payload(destination_result))
+                if not origin_location or not destination_location:
+                    raise MapProviderError("Amap MCP geocoding returned no location")
+                result = await self._call_tool(
+                    session,
+                    route_tool.name,
+                    {"origin": origin_location, "destination": destination_location},
                 )
         payload = self._result_payload(result)
         distance_m = self._find_number(payload, {"distance"})
@@ -85,13 +87,19 @@ class AmapMcpProvider:
 
     @staticmethod
     def _select_tool(tools: list[Any], suffix: str) -> Any:
-        candidates = [tool for tool in tools if suffix in tool.name.lower()]
+        candidates = [tool for tool in tools if suffix.lower() in tool.name.lower()]
         if not candidates:
             raise MapProviderError(f"Amap MCP does not expose a tool matching {suffix}")
         return candidates[0]
 
+    async def _call_tool(self, session: ClientSession, name: str, arguments: dict[str, str]) -> Any:
+        return await asyncio.wait_for(session.call_tool(name, arguments), timeout=self.timeout_seconds)
+
     @classmethod
     def _result_payload(cls, result: Any) -> Any:
+        if getattr(result, "isError", False):
+            message = " ".join(getattr(item, "text", "") for item in getattr(result, "content", []) or [])
+            raise MapProviderError(message or "Amap MCP tool returned an error")
         structured = getattr(result, "structuredContent", None)
         if structured:
             return structured
@@ -107,6 +115,22 @@ class AmapMcpProvider:
             return json.loads(raw)
         except json.JSONDecodeError:
             return {"text": raw}
+
+    @classmethod
+    def _extract_location(cls, value: Any) -> str | None:
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                if key.lower() == "location" and isinstance(item, str):
+                    return item
+                found = cls._extract_location(item)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = cls._extract_location(item)
+                if found:
+                    return found
+        return None
 
     @classmethod
     def _find_number(cls, value: Any, keys: set[str]) -> float | None:
