@@ -53,6 +53,18 @@ class InventoryItem(DomainModel):
     warehouse: str
 
 
+class RentalInventory(DomainModel):
+    listing_id: str
+    city: str
+    vehicle_type: str
+    model: str
+    available_units: int = Field(ge=0)
+    daily_rate: float = Field(ge=0)
+    monthly_rate: float = Field(ge=0)
+    deposit: float = Field(ge=0)
+    min_days: int = Field(ge=1)
+
+
 class IncidentTicket(DomainModel):
     ticket_id: str
     order_id: str
@@ -102,6 +114,39 @@ class PreTripPlanResponse(DomainModel):
     nearby_vehicles: list[dict] = Field(default_factory=list)
     estimate: dict
     reservation: dict | None = None
+
+
+class LongRentalPlanRequest(DomainModel):
+    user_id: str = "usr_demo_001"
+    city: str = Field(min_length=1)
+    duration_days: int = Field(ge=1, le=365)
+    start_date: str | None = None
+    vehicle_type: str | None = None
+    daily_budget: float | None = Field(default=None, ge=0)
+
+
+class LongRentalCandidate(DomainModel):
+    listing_id: str
+    city: str
+    vehicle_type: str
+    model: str
+    available_units: int
+    duration_days: int
+    billing_basis: str
+    rental_fee: float
+    deposit: float
+    estimated_total: float
+    within_budget: bool | None = None
+    assumptions: list[str] = Field(default_factory=list)
+
+
+class LongRentalPlanResponse(DomainModel):
+    city: str
+    duration_days: int
+    answerable: bool
+    message: str
+    candidates: list[LongRentalCandidate] = Field(default_factory=list)
+    missing_fields: list[str] = Field(default_factory=list)
 
 
 class CustomerServiceQueryRequest(DomainModel):

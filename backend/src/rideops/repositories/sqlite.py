@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from rideops.domain.models import IncidentTicket, InventoryItem, Order, Vehicle
+from rideops.domain.models import IncidentTicket, InventoryItem, Order, RentalInventory, Vehicle
 
 
 class BusinessToolError(Exception):
@@ -55,6 +55,17 @@ class SQLiteBusinessRepository:
                     quantity INTEGER NOT NULL,
                     warehouse TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS rental_inventory (
+                    listing_id TEXT PRIMARY KEY,
+                    city TEXT NOT NULL,
+                    vehicle_type TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    available_units INTEGER NOT NULL,
+                    daily_rate REAL NOT NULL,
+                    monthly_rate REAL NOT NULL,
+                    deposit REAL NOT NULL,
+                    min_days INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS incident_tickets (
                     ticket_id TEXT PRIMARY KEY,
                     order_id TEXT NOT NULL,
@@ -100,6 +111,15 @@ class SQLiteBusinessRepository:
                 connection.execute("INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?)", ("veh_demo_001", "沪A·MOCK01", "RideOps E-bike", "in_use", 72, "上海市静安区"))
                 connection.execute("INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?)", ("veh_demo_002", "沪A·MOCK02", "RideOps E-bike", "available", 88, "上海市静安区"))
                 connection.execute("INSERT INTO inventory VALUES (?, ?, ?, ?)", ("inv_lock_001", "智能锁组件", 18, "上海一号仓"))
+            if connection.execute("SELECT COUNT(*) FROM rental_inventory").fetchone()[0] == 0:
+                connection.executemany(
+                    "INSERT INTO rental_inventory VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        ("rent_sh_e1", "上海", "电单车", "RideOps E-bike E1", 8, 39.0, 699.0, 300.0, 3),
+                        ("rent_sh_e2", "上海", "电单车", "RideOps E-bike E2", 3, 49.0, 899.0, 500.0, 7),
+                        ("rent_hz_e1", "杭州", "电单车", "RideOps E-bike H1", 5, 35.0, 649.0, 300.0, 3),
+                    ],
+                )
             if connection.execute("SELECT 1 FROM vehicles WHERE vehicle_id = 'veh_demo_002'").fetchone() is None:
                 connection.execute("INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?)", ("veh_demo_002", "沪A·MOCK02", "RideOps E-bike", "available", 88, "上海市静安区"))
 
@@ -145,6 +165,33 @@ class SQLiteBusinessRepository:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM inventory ORDER BY item_id").fetchall()
             return [InventoryItem(item_id=row["item_id"], item_name=row["item_name"], quantity=row["quantity"], warehouse=row["warehouse"]) for row in rows]
+
+    def get_rental_inventory(self, city: str, vehicle_type: str | None = None) -> list[RentalInventory]:
+        with self._connect() as connection:
+            if vehicle_type:
+                rows = connection.execute(
+                    "SELECT * FROM rental_inventory WHERE city = ? AND vehicle_type = ? AND available_units > 0 ORDER BY monthly_rate",
+                    (city, vehicle_type),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM rental_inventory WHERE city = ? AND available_units > 0 ORDER BY monthly_rate",
+                    (city,),
+                ).fetchall()
+            return [
+                RentalInventory(
+                    listing_id=row["listing_id"],
+                    city=row["city"],
+                    vehicle_type=row["vehicle_type"],
+                    model=row["model"],
+                    available_units=row["available_units"],
+                    daily_rate=row["daily_rate"],
+                    monthly_rate=row["monthly_rate"],
+                    deposit=row["deposit"],
+                    min_days=row["min_days"],
+                )
+                for row in rows
+            ]
 
     def get_ticket(self, ticket_id: str) -> IncidentTicket | None:
         with self._connect() as connection:

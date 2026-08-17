@@ -7,7 +7,7 @@ from rideops.integrations import build_map_provider
 from rideops.rag import build_default_service
 from rideops.rag.embeddings import build_embedding_provider
 from rideops.repositories import SQLiteBusinessRepository
-from rideops.services import BusinessTools
+from rideops.services import BusinessTools, LongRentalService
 
 
 def _model(value: Any) -> dict | None:
@@ -23,6 +23,7 @@ def build_server() -> FastMCP:
     server = FastMCP("rideops-customer-service")
     repository = SQLiteBusinessRepository(settings.database_path)
     tools = BusinessTools(repository, map_provider=build_map_provider(settings.map_provider, settings.amap_api_key))
+    long_rental_service = LongRentalService(repository)
     rag_service = build_default_service(settings.policies_dir, settings.rag_index_path, build_embedding_provider(settings))
 
     @server.tool()
@@ -50,6 +51,21 @@ def build_server() -> FastMCP:
         """检索本地出行政策并返回可引用证据。只读。"""
         response = rag_service.query(query, top_k=top_k)
         return response.model_dump(mode="json")
+
+    @server.tool()
+    def plan_long_rental(city: str, duration_days: int, vehicle_type: str | None = None, daily_budget: float | None = None, start_date: str | None = None) -> dict:
+        """查询长租库存和价格方案。只读，不会创建租赁订单。"""
+        from rideops.domain.models import LongRentalPlanRequest
+
+        return long_rental_service.plan(
+            LongRentalPlanRequest(
+                city=city,
+                duration_days=duration_days,
+                vehicle_type=vehicle_type,
+                daily_budget=daily_budget,
+                start_date=start_date,
+            )
+        ).model_dump(mode="json")
 
     @server.tool()
     def reserve_vehicle(vehicle_id: str, user_id: str, idempotency_key: str, approval_reference: str) -> dict:

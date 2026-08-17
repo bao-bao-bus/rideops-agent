@@ -21,6 +21,7 @@ rideops-mcp
 - `search_nearby_vehicles`
 - `estimate_route_and_fare`
 - `search_local_policy`
+- `plan_long_rental`
 
 写工具：
 
