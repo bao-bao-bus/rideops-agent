@@ -63,7 +63,7 @@ flowchart TD
     DB2 --> V1[只读工具回读最终状态]
     V1 --> DONE[Run completed]
 
-    DONE --> F[Next.js 工作台：普通 HTTP 展示真实状态]
+    DONE --> F[Next.js 客服对话：按需展示确认结果]
     SAFE --> F
     ASK --> F
     REF --> F

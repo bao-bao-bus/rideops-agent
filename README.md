@@ -1,6 +1,6 @@
 # RideOps Agent
 
-面向共享出行业务的 Agent 应用开发实习项目。当前仓库保留原有 Next.js 前端交互原型，并新增了第一轮 Python 后端基础与 Agent Skills 能力。
+面向共享出行业务的 Agent 应用开发实习项目。Next.js 前端现为面向用户的城市出行客服对话界面；Python 后端提供可审计的业务能力、Agent Skills 与受控写入流程。
 
 ## 当前完成状态
 
@@ -110,6 +110,8 @@ pytest
 npm install
 npm run dev
 ```
+
+访问 http://127.0.0.1:3000。前端以自然语言对话为主，按需展示路线/费用、附近车辆预约、政策依据、长租确认和事故安全确认；不会默认创建事故 Run，也不会向用户暴露工具名、运行 ID 或审计 JSON。
 
 ## RAG 检索示例
 

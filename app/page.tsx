@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_RIDEOPS_API_URL ?? "http://127.0.0.1:8000";
-
-type UiStatus = "loading" | "waiting" | "approved" | "rejected";
 
 type Evidence = {
   document_id: string;
@@ -15,263 +13,547 @@ type Evidence = {
   source: string;
 };
 
-type PlannedAction = {
-  action_id: string;
-  tool: string;
-  reason: string;
-  risk: string;
-  requires_approval: boolean;
-  arguments: Record<string, string>;
+type Vehicle = {
+  vehicle_id: string;
+  model: string;
+  battery_percent: number;
+  current_location: string;
 };
 
-type RunData = {
-  run_id: string;
-  workflow_status: string;
-  selected_skill: string | null;
-  collected_fields: Record<string, string | null>;
-  missing_fields: string[];
-  evidence: Evidence[];
-  planned_actions: PlannedAction[];
-  approval: string;
-  action_results: Array<{ action_id: string; tool: string; status: string; result?: Record<string, string> }>;
-  final_state: {
-    order?: { order_id: string; billing_status: string; status: string } | null;
-    vehicle?: { vehicle_id: string; status: string } | null;
-    ticket?: { ticket_id: string; status: string } | null;
-  };
-  events: Array<{ event_id: number; event_type: string; payload: Record<string, unknown>; created_at: string }>;
-  message: string;
-};
-
-type CustomerEvidence = {
-  document_id: string;
-  title: string;
-  section: string;
-  content: string;
-  score: number;
-  source: string;
+type LongRentalCandidate = {
+  listing_id: string;
+  model: string;
+  duration_days: number;
+  rental_fee: number;
+  deposit: number;
+  estimated_total: number;
+  available_units: number;
+  billing_basis: string;
+  within_budget: boolean | null;
 };
 
 type CustomerResult = {
   scenario: string;
-  selected_skill: string | null;
-  matched_terms: string[];
   answerable: boolean;
-  missing_fields: string[];
   message: string;
-  evidence: CustomerEvidence[];
-  nearby_vehicles: Array<{ vehicle_id: string; model: string; status: string; battery_percent: number; current_location: string }>;
-  estimate: { distance_km: number; estimated_minutes: number; estimated_fee: number; currency: string; source: string; pricing_source: string; fallback_reason?: string } | null;
+  missing_fields: string[];
+  delegated_agents: string[];
+  evidence: Evidence[];
+  nearby_vehicles: Vehicle[];
+  estimate: {
+    distance_km: number;
+    estimated_minutes: number;
+    estimated_fee: number;
+    source: string;
+    pricing_source: string;
+    fallback_reason?: string;
+  } | null;
+  long_rental_plan: { candidates: LongRentalCandidate[] } | null;
+  next_action: {
+    method: string;
+    endpoint: string;
+    payload: Record<string, string | undefined>;
+  } | null;
 };
 
-const demoRequest = {
-  user_id: "usr_demo_001",
-  message: "我在上海静安区骑车发生碰撞，手臂有轻微擦伤，车锁损坏，订单仍在计费，怎么办？",
-  order_id: "ord_demo_001",
-  vehicle_id: "veh_demo_001",
-  location: "上海市静安区",
-  description: "车辆碰撞，用户手臂有轻微擦伤，车锁损坏",
+type IncidentAction = {
+  action_id: string;
+  title: string;
+  reason: string;
+  risk: string;
 };
 
-const toolLabels: Record<string, string> = {
-  suspend_order_billing: "暂停订单计费",
-  mark_vehicle_unavailable: "车辆标记为不可用",
-  create_incident_ticket: "创建事故工单",
+type IncidentRun = {
+  run_id: string;
+  workflow_status: string;
+  message: string;
+  approval: string;
+  planned_actions: IncidentAction[];
+  final_state: {
+    order?: { billing_status: string };
+    vehicle?: { status: string };
+    ticket?: { ticket_id: string; status: string };
+  };
 };
 
-function uiStatus(run: RunData | null): UiStatus {
-  if (!run) return "loading";
-  if (run.workflow_status === "completed") return "approved";
-  if (run.workflow_status === "safe_terminated" || run.workflow_status === "failed") return "rejected";
-  return "waiting";
+type Reservation = {
+  reservation_id: string;
+  vehicle_id: string;
+  status: string;
+  vehicle_status?: string;
+};
+
+type ChatMessage = {
+  id: string;
+  role: "customer" | "assistant";
+  text: string;
+  result?: CustomerResult;
+};
+
+type ContextFields = {
+  origin: string;
+  destination: string;
+  location: string;
+  city: string;
+  durationDays: string;
+  dailyBudget: string;
+  orderId: string;
+  vehicleId: string;
+  description: string;
+};
+
+const emptyContext: ContextFields = {
+  origin: "",
+  destination: "",
+  location: "",
+  city: "",
+  durationDays: "",
+  dailyBudget: "",
+  orderId: "",
+  vehicleId: "",
+  description: "",
+};
+
+const agentLabels: Record<string, string> = {
+  "pretrip-agent": "出行规划",
+  "policy-agent": "本地规则",
+  "long-rental-agent": "长租顾问",
+  "incident-triage-agent": "事故分诊",
+};
+
+function operationKey(prefix: string) {
+  return prefix + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
 }
 
-function stepState(run: RunData | null, index: number) {
-  if (!run) return "pending";
-  if (run.workflow_status === "completed") return "done";
-  if (run.workflow_status === "safe_terminated" || run.workflow_status === "failed") return index < 4 ? "done" : "rejected";
-  if (run.workflow_status === "waiting_for_input") return index < 2 ? "done" : index === 2 ? "active" : "pending";
-  return index < 4 ? "done" : index === 4 ? "active" : "pending";
+function messageId() {
+  return "message-" + operationKey("ui");
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY", maximumFractionDigits: 0 }).format(value);
 }
 
 export default function Home() {
-  const [run, setRun] = useState<RunData | null>(null);
-  const [customerMessage, setCustomerMessage] = useState("从静安区到人民广场怎么走，大概要多少钱？");
-  const [customerOrigin, setCustomerOrigin] = useState("上海市静安区");
-  const [customerDestination, setCustomerDestination] = useState("上海市人民广场");
-  const [customerLocation, setCustomerLocation] = useState("上海市静安区");
-  const [customerCity, setCustomerCity] = useState("上海");
-  const [customerResult, setCustomerResult] = useState<CustomerResult | null>(null);
-  const [customerLoading, setCustomerLoading] = useState(false);
-  const [tab, setTab] = useState<"plan" | "evidence" | "audit">("plan");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [context, setContext] = useState<ContextFields>(emptyContext);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      text: "你好，我是 RideOps 出行助手。可以帮你规划路线、估算费用、查找附近车辆、解释当地规则，也能协助处理长租和事故报备。",
+    },
+  ]);
+  const [apiState, setApiState] = useState<"checking" | "ready" | "offline">("checking");
+  const [sending, setSending] = useState(false);
+  const [incidentRun, setIncidentRun] = useState<IncidentRun | null>(null);
+  const [incidentBusy, setIncidentBusy] = useState(false);
+  const [reservation, setReservation] = useState<Reservation | null>(null);
+  const [leadCandidate, setLeadCandidate] = useState<LongRentalCandidate | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch(`${API_BASE}/api/runs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(demoRequest),
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`后端返回 ${response.status}`);
-        return response.json() as Promise<RunData>;
+    let active = true;
+    fetch(API_BASE + "/health")
+      .then((response) => {
+        if (!response.ok) throw new Error("health check failed");
+        if (active) setApiState("ready");
       })
-      .then((data) => {
-        if (!cancelled) setRun(data);
-      })
-      .catch((reason: Error) => {
-        if (!cancelled) setError(`无法连接后端：${reason.message}`);
+      .catch(() => {
+        if (active) setApiState("offline");
       });
     return () => {
-      cancelled = true;
+      active = false;
     };
   }, []);
 
-  const status = uiStatus(run);
-  const actionTitle = status === "waiting" ? (run?.workflow_status === "waiting_for_input" ? "需要补充信息" : "需要人工批准") : status === "approved" ? "执行已完成" : status === "rejected" ? "流程已终止" : "正在连接后端";
-  const ticketId = run?.final_state.ticket?.ticket_id;
-  const steps = useMemo(() => [
-    ["意图识别", run?.selected_skill ?? "等待后端路由"],
-    ["Skill 加载", run?.selected_skill ?? "等待 Skill"],
-    ["RAG 检索", run?.evidence.length ? `命中 ${run.evidence.length} 条事故政策` : "等待证据"],
-    ["业务查询", run?.final_state.order ? `订单 ${run.final_state.order.order_id} 已核验` : "等待订单信息"],
-    ["人工审批", run?.approval === "pending" ? "等待运营人员确认" : run?.approval === "approved" ? "已批准" : run?.approval === "rejected" ? "已拒绝" : "未进入审批"],
-    ["可靠执行", run?.workflow_status === "completed" ? "工具执行成功，结果已回读" : "审批后执行写操作"],
-  ], [run]);
+  function updateContext(name: keyof ContextFields, value: string) {
+    setContext((previous) => ({ ...previous, [name]: value }));
+  }
 
-  async function resume(approved: boolean) {
-    if (!run) return;
-    setSubmitting(true);
-    setError(null);
+  function usePrompt(kind: "route" | "nearby" | "policy" | "rental" | "incident") {
+    const presets: Record<typeof kind, { message: string; context: Partial<ContextFields> }> = {
+      route: {
+        message: "从静安区到人民广场怎么走，大概要多少钱？",
+        context: { origin: "上海市静安区", destination: "上海市人民广场", location: "" },
+      },
+      nearby: {
+        message: "附近有没有电量充足的可用车辆？",
+        context: { location: "上海市静安区", origin: "", destination: "" },
+      },
+      policy: {
+        message: "共享电单车应该在哪里停车？",
+        context: { city: "上海", origin: "", destination: "" },
+      },
+      rental: {
+        message: "我想在上海长租电单车，有合适的方案吗？",
+        context: { city: "上海", durationDays: "45", dailyBudget: "40" },
+      },
+      incident: {
+        message: "车辆发生碰撞，订单还在扣费，我该怎么办？",
+        context: { orderId: "ord_demo_001", location: "上海市静安区", description: "车辆碰撞，需要客服协助处理" },
+      },
+    };
+    const preset = presets[kind];
+    setMessage(preset.message);
+    setContext((previous) => ({ ...previous, ...preset.context }));
+  }
+
+  async function sendMessage(event?: FormEvent) {
+    event?.preventDefault();
+    const text = message.trim();
+    if (!text || sending) return;
+    const userMessage: ChatMessage = { id: messageId(), role: "customer", text };
+    setMessages((previous) => [...previous, userMessage]);
+    setMessage("");
+    setSending(true);
+    setToast(null);
     try {
-      const response = await fetch(`${API_BASE}/api/runs/${run.run_id}/resume`, {
+      const response = await fetch(API_BASE + "/api/customer-service/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          origin: context.origin || undefined,
+          destination: context.destination || undefined,
+          location: context.location || undefined,
+          city: context.city || undefined,
+          duration_days: context.durationDays ? Number(context.durationDays) : undefined,
+          daily_budget: context.dailyBudget ? Number(context.dailyBudget) : undefined,
+          order_id: context.orderId || undefined,
+          vehicle_id: context.vehicleId || undefined,
+          description: context.description || undefined,
+        }),
+      });
+      if (!response.ok) throw new Error("客服服务暂时不可用");
+      const result = (await response.json()) as CustomerResult;
+      setMessages((previous) => [...previous, { id: messageId(), role: "assistant", text: result.message, result }]);
+      setApiState("ready");
+    } catch (reason) {
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: messageId(),
+          role: "assistant",
+          text: reason instanceof Error ? "暂时没有连上客服服务，请稍后重试。" : "暂时没有连上客服服务，请稍后重试。",
+        },
+      ]);
+      setApiState("offline");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function startIncident(nextAction: NonNullable<CustomerResult["next_action"]>) {
+    setIncidentBusy(true);
+    setToast(null);
+    try {
+      const response = await fetch(API_BASE + nextAction.endpoint, {
+        method: nextAction.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...nextAction.payload, idempotency_key: operationKey("incident") }),
+      });
+      if (!response.ok) throw new Error("事故处理流程暂时无法创建");
+      setIncidentRun((await response.json()) as IncidentRun);
+    } catch (reason) {
+      setToast(reason instanceof Error ? reason.message : "事故处理流程暂时无法创建");
+    } finally {
+      setIncidentBusy(false);
+    }
+  }
+
+  async function respondToIncident(approved: boolean) {
+    if (!incidentRun) return;
+    setIncidentBusy(true);
+    try {
+      const response = await fetch(API_BASE + "/api/runs/" + incidentRun.run_id + "/resume", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approved }),
       });
-      if (!response.ok) throw new Error(`后端返回 ${response.status}`);
-      setRun(await response.json());
+      if (!response.ok) throw new Error("无法提交本次确认");
+      setIncidentRun((await response.json()) as IncidentRun);
     } catch (reason) {
-      setError(`操作失败：${reason instanceof Error ? reason.message : "未知错误"}`);
+      setToast(reason instanceof Error ? reason.message : "无法提交本次确认");
     } finally {
-      setSubmitting(false);
+      setIncidentBusy(false);
     }
   }
 
-  async function askCustomer() {
-    setCustomerLoading(true);
-    setError(null);
+  async function reserveVehicle(vehicle: Vehicle) {
+    setToast(null);
     try {
-      const response = await fetch(`${API_BASE}/api/customer-service/query`, {
+      const response = await fetch(API_BASE + "/api/pretrip/reserve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: "usr_demo_001", vehicle_id: vehicle.vehicle_id, idempotency_key: operationKey("reserve") }),
+      });
+      if (!response.ok) throw new Error("这辆车刚刚被其他用户预约了");
+      setReservation((await response.json()) as Reservation);
+      setToast("已为你保留这辆车。出发前如改变计划，可以在这里取消预约。");
+    } catch (reason) {
+      setToast(reason instanceof Error ? reason.message : "暂时无法预约");
+    }
+  }
+
+  async function cancelReservation() {
+    if (!reservation) return;
+    setToast(null);
+    try {
+      const response = await fetch(API_BASE + "/api/pretrip/reservations/" + reservation.reservation_id + "/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: customerMessage,
-          origin: customerOrigin || undefined,
-          destination: customerDestination || undefined,
-          location: customerLocation || undefined,
-          city: customerCity || undefined,
+          user_id: "usr_demo_001",
+          idempotency_key: operationKey("cancel"),
+          approval_reference: "customer-confirmed-" + Date.now(),
         }),
       });
-      if (!response.ok) throw new Error(`后端返回 ${response.status}`);
-      setCustomerResult(await response.json() as CustomerResult);
+      if (!response.ok) throw new Error("暂时无法取消预约");
+      const cancelled = (await response.json()) as Reservation;
+      setReservation(cancelled);
+      setToast("预约已取消，车辆已恢复为可用状态。");
     } catch (reason) {
-      setError(`客服查询失败：${reason instanceof Error ? reason.message : "未知错误"}`);
-    } finally {
-      setCustomerLoading(false);
+      setToast(reason instanceof Error ? reason.message : "暂时无法取消预约");
     }
   }
 
-  function useCustomerExample(kind: "route" | "nearby" | "policy") {
-    if (kind === "route") {
-      setCustomerMessage("从静安区到人民广场怎么走，大概要多少钱？");
-      setCustomerOrigin("上海市静安区");
-      setCustomerDestination("上海市人民广场");
-    } else if (kind === "nearby") {
-      setCustomerMessage("附近有没有可用车辆？");
-      setCustomerOrigin("");
-      setCustomerDestination("");
-      setCustomerLocation("上海市静安区");
-    } else {
-      setCustomerMessage("共享电单车应该在哪里停车？");
-      setCustomerOrigin("");
-      setCustomerDestination("");
-      setCustomerCity("上海");
+  async function createRentalLead() {
+    if (!leadCandidate) return;
+    setToast(null);
+    try {
+      const response = await fetch(API_BASE + "/api/long-rental/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: "usr_demo_001",
+          listing_id: leadCandidate.listing_id,
+          duration_days: leadCandidate.duration_days,
+          start_date: "2026-09-01",
+          idempotency_key: operationKey("rental"),
+          approval_reference: "customer-confirmed-" + Date.now(),
+        }),
+      });
+      if (!response.ok) throw new Error("暂时无法提交长租意向");
+      setLeadCandidate(null);
+      setToast("长租意向已登记，客服会依据当前方案跟进；这不会生成支付或租赁订单。");
+    } catch (reason) {
+      setToast(reason instanceof Error ? reason.message : "暂时无法提交长租意向");
     }
-    setCustomerResult(null);
   }
 
   return (
-    <main>
-      <header className="topbar">
-        <div className="brand"><span className="logo">R</span><div><b>RideOps Agent</b><small>共享出行业务智能体</small></div></div>
-        <div className="status"><span /> {error ? "BACKEND ERROR" : "LIVE BACKEND"}</div>
+    <main className="shell">
+      <header className="masthead">
+        <a className="brand" href="#conversation" aria-label="RideOps 出行助手首页">
+          <span className="brandMark">R</span>
+          <span><b>RideOps</b><small>城市出行助手</small></span>
+        </a>
+        <div className={"connection " + apiState}>
+          <i />
+          {apiState === "ready" ? "客服在线" : apiState === "checking" ? "正在连接" : "暂未连接"}
+        </div>
       </header>
 
-      <section className="hero">
-        <div><p className="eyebrow">AGENT OPERATIONS WORKBENCH</p><h1>让客服 Agent 不只回答，<br />还能安全地完成业务。</h1></div>
-        <div className="heroMeta"><span>RUN ID</span><b>{run?.run_id ?? "creating..."}</b><span>API</span><b>{API_BASE}</b></div>
-      </section>
-
-      {error && <div className="result rejectedResult">{error}。请确认后端已启动：<code>uvicorn rideops.api.app:app --reload</code></div>}
-
-      <section className="customer panel">
-        <div className="panelTitle"><span>00</span><div><b>出行客服查询</b><small>路线 · 费用 · 附近车辆 · 本地政策</small></div></div>
-        <div className="customerBody">
-          <div className="customerIntro">
-            <p className="eyebrow">READ-ONLY CUSTOMER SERVICE</p>
-            <h2>先把问题答清楚，<br />再决定是否执行动作。</h2>
-            <p>查询类问题不需要审批；路线来自高德 MCP，费用由 RideOps 计价，政策回答必须带有知识库证据。</p>
-            <div className="quickQueries"><button onClick={() => useCustomerExample("route")}>路线和费用</button><button onClick={() => useCustomerExample("nearby")}>附近车辆</button><button onClick={() => useCustomerExample("policy")}>停车政策</button></div>
-          </div>
-          <div className="customerForm">
-            <label>用户问题<input value={customerMessage} onChange={(event) => setCustomerMessage(event.target.value)} /></label>
-            <div className="inputRow"><label>出发地<input placeholder="路线问题可填" value={customerOrigin} onChange={(event) => setCustomerOrigin(event.target.value)} /></label><label>目的地<input placeholder="路线问题可填" value={customerDestination} onChange={(event) => setCustomerDestination(event.target.value)} /></label></div>
-            <div className="inputRow"><label>当前位置<input placeholder="附近车辆问题可填" value={customerLocation} onChange={(event) => setCustomerLocation(event.target.value)} /></label><label>城市<input placeholder="政策问题可填" value={customerCity} onChange={(event) => setCustomerCity(event.target.value)} /></label></div>
-            <button className="primary customerSubmit" disabled={customerLoading || !customerMessage.trim()} onClick={askCustomer}>{customerLoading ? "查询中..." : "查询客服能力"}</button>
-          </div>
-        </div>
-        {customerResult && <div className="customerResult">
-          <div className="customerResultHead"><div><span className="resultKicker">{customerResult.scenario.toUpperCase()}</span><h3>{customerResult.message}</h3></div><span className={`answerPill ${customerResult.answerable ? "answerable" : "unanswerable"}`}>{customerResult.answerable ? "EVIDENCE READY" : "NEEDS INPUT"}</span></div>
-          {customerResult.estimate && <div className="customerMetrics"><div><span>距离</span><b>{customerResult.estimate.distance_km} km</b></div><div><span>预计时间</span><b>{customerResult.estimate.estimated_minutes} min</b></div><div><span>预估费用</span><b>¥ {customerResult.estimate.estimated_fee}</b></div><div><span>数据来源</span><b>{customerResult.estimate.source}</b></div></div>}
-          {customerResult.estimate?.fallback_reason && <div className="result rejectedResult">地图服务暂时不可用，已回退到合成路线：{customerResult.estimate.fallback_reason}</div>}
-          {customerResult.nearby_vehicles.length > 0 && <div className="customerVehicles">{customerResult.nearby_vehicles.map((vehicle) => <article key={vehicle.vehicle_id}><b>{vehicle.vehicle_id}</b><span>{vehicle.model}</span><small>{vehicle.current_location} · 电量 {vehicle.battery_percent}%</small></article>)}</div>}
-          {customerResult.evidence.length > 0 && <div className="customerEvidence"><p className="resultKicker">POLICY EVIDENCE</p>{customerResult.evidence.map((item) => <article key={`${item.document_id}-${item.section}`}><b>{item.title} · {item.section}</b><p>{item.content}</p><small>{item.source} · score {item.score}</small></article>)}</div>}
-          {customerResult.missing_fields.length > 0 && <div className="result rejectedResult">还需要补充：{customerResult.missing_fields.join("、")}</div>}
-        </div>}
-      </section>
-
-      <section className="workspace">
-        <div className="chat panel">
-          <div className="panelTitle"><span>01</span><div><b>用户会话</b><small>事故处理 · SQLite + LangGraph MVP</small></div></div>
-          <div className="message user">{demoRequest.message}</div>
-          <div className="message agent"><b>{run?.message ?? "正在创建真实 Run..."}</b><p>{run?.workflow_status === "waiting_for_input" ? "后端已识别到信息缺口，暂不执行任何写操作。" : "当前内容来自后端 Run、RAG 证据和 SQLite 回读，不再使用前端固定执行结果。"}</p></div>
-          <div className="facts"><div><span>订单</span><b>{run?.collected_fields.order_id ?? "待补充"}</b></div><div><span>车辆</span><b>{run?.collected_fields.vehicle_id ?? "待查询"}</b></div><div><span>地点</span><b>{run?.collected_fields.location ?? "待补充"}</b></div></div>
-        </div>
-
-        <div className="trace panel">
-          <div className="panelTitle"><span>02</span><div><b>执行轨迹</b><small>真实 Run 状态 · 暂不使用 SSE</small></div></div>
-          <div className="timeline">
-            {steps.map(([name, desc], index) => {
-              const current = stepState(run, index);
-              return <div className={`step ${current}`} key={name}><i>{current === "done" ? "✓" : index + 1}</i><div><b>{name}</b><small>{desc}</small></div></div>;
-            })}
-          </div>
+      <section className="welcome">
+        <p className="overline">RIDE WITH CLARITY</p>
+        <h1>把路上的问题，<em>说清楚。</em></h1>
+        <p>路线、费用、车辆与当地规则，交给一个懂出行的客服。需要处理事故时，再由你确认每一步。</p>
+        <div className="promptRail" aria-label="快捷提问">
+          <button onClick={() => usePrompt("route")}>路线与费用</button>
+          <button onClick={() => usePrompt("nearby")}>附近车辆</button>
+          <button onClick={() => usePrompt("policy")}>停车规则</button>
+          <button onClick={() => usePrompt("rental")}>长租咨询</button>
+          <button onClick={() => usePrompt("incident")}>事故报备</button>
         </div>
       </section>
 
-      <section className="decision panel">
-        <div className="decisionHead"><div><p className="eyebrow">HUMAN-IN-THE-LOOP</p><h2>{actionTitle}</h2></div><span className={`pill ${status}`}>{status === "loading" ? "CONNECTING" : run?.workflow_status.toUpperCase()}</span></div>
-        <div className="tabs"><button className={tab === "plan" ? "selected" : ""} onClick={() => setTab("plan")}>执行计划</button><button className={tab === "evidence" ? "selected" : ""} onClick={() => setTab("evidence")}>证据与回读</button><button className={tab === "audit" ? "selected" : ""} onClick={() => setTab("audit")}>审计日志</button></div>
-        {tab === "plan" ? <div className="toolGrid">{run?.planned_actions.length ? run.planned_actions.map((action) => <article key={action.action_id}><code>{action.tool}</code><b>{toolLabels[action.tool] ?? action.tool}</b><p>{action.reason}</p><small>风险：{action.risk}</small><span>{action.requires_approval ? "WRITE · APPROVAL REQUIRED" : "READ ONLY"}</span></article>) : <article><b>{run?.message ?? "正在读取后端计划"}</b><p>{run?.missing_fields.join("、") || "暂无可执行动作"}</p></article>}</div> : tab === "evidence" ? <div className="evidence">{run?.evidence.map((item) => <article key={`${item.document_id}-${item.section}`}><b>{item.title} · {item.section}</b><p>{item.content}</p><small>score {item.score} · {item.source}</small></article>)}{run?.final_state.order && <article><b>SQLite 业务状态回读</b><p>订单计费：{run.final_state.order.billing_status}；车辆状态：{run.final_state.vehicle?.status ?? "未回读"}；工单：{run.final_state.ticket?.status ?? "尚未创建"}</p></article>}</div> : <div className="evidence">{run?.events.map((event) => <article key={event.event_id}><code>{event.event_type}</code><b>{new Date(event.created_at).toLocaleTimeString("zh-CN")}</b><p>{JSON.stringify(event.payload)}</p></article>)}</div>}
-        {run?.workflow_status === "awaiting_approval" && <div className="actions"><button className="secondary" disabled={submitting} onClick={() => resume(false)}>拒绝执行</button><button className="primary" disabled={submitting} onClick={() => resume(true)}>{submitting ? "处理中..." : "批准并执行"}</button></div>}
-        {run?.workflow_status === "completed" && <div className="result">✓ SQLite 持久化写入成功 · 事故工单 {ticketId ?? "已创建"} · 订单、车辆和工单状态已回读</div>}
-        {run?.workflow_status === "safe_terminated" && <div className="result rejectedResult">流程已安全终止，未调用任何写工具。</div>}
+      {toast && <div className="toast" role="status">{toast}</div>}
+
+      <section className="serviceGrid">
+        <section className="conversation" id="conversation" aria-label="与 RideOps 出行助手对话">
+          <div className="conversationTop">
+            <div>
+              <p className="overline">CONVERSATION</p>
+              <h2>今天想去哪里？</h2>
+            </div>
+            <span className="quietBadge">仅在需要时请求确认</span>
+          </div>
+
+          <div className="messages">
+            {messages.map((item) => (
+              <article className={"bubble " + item.role} key={item.id}>
+                {item.role === "assistant" && <span className="assistantAvatar">R</span>}
+                <div className="bubbleContent">
+                  <p>{item.text}</p>
+                  {item.result && (
+                    <AnswerDetails
+                      result={item.result}
+                      onReserve={reserveVehicle}
+                      onIncident={startIncident}
+                      onSelectLead={setLeadCandidate}
+                    />
+                  )}
+                </div>
+              </article>
+            ))}
+            {sending && <article className="bubble assistant"><span className="assistantAvatar">R</span><div className="typing"><i /><i /><i /></div></article>}
+          </div>
+
+          <form className="composer" onSubmit={sendMessage}>
+            <details className="contextPanel">
+              <summary>补充行程信息 <span>可选</span></summary>
+              <div className="contextFields">
+                <label>出发地<input value={context.origin} onChange={(event) => updateContext("origin", event.target.value)} placeholder="如：静安寺" /></label>
+                <label>目的地<input value={context.destination} onChange={(event) => updateContext("destination", event.target.value)} placeholder="如：人民广场" /></label>
+                <label>当前位置<input value={context.location} onChange={(event) => updateContext("location", event.target.value)} placeholder="用于查找车辆" /></label>
+                <label>城市<input value={context.city} onChange={(event) => updateContext("city", event.target.value)} placeholder="用于规则和长租" /></label>
+                <label>长租天数<input inputMode="numeric" value={context.durationDays} onChange={(event) => updateContext("durationDays", event.target.value)} placeholder="长租时填写" /></label>
+                <label>日预算<input inputMode="decimal" value={context.dailyBudget} onChange={(event) => updateContext("dailyBudget", event.target.value)} placeholder="可选" /></label>
+                <label>订单号<input value={context.orderId} onChange={(event) => updateContext("orderId", event.target.value)} placeholder="事故报备时填写" /></label>
+                <label>事故说明<input value={context.description} onChange={(event) => updateContext("description", event.target.value)} placeholder="事故报备时填写" /></label>
+              </div>
+            </details>
+            <div className="sendRow">
+              <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="例如：静安寺到人民广场大概多少钱？" rows={2} />
+              <button className="sendButton" type="submit" disabled={!message.trim() || sending} aria-label="发送问题">↗</button>
+            </div>
+          </form>
+        </section>
+
+        <aside className="tripDesk" aria-label="行程与确认状态">
+          <div className="deskHeader">
+            <p className="overline">YOUR RIDE</p>
+            <h2>行程小记</h2>
+          </div>
+          <div className="deskNote">
+            <span>01</span>
+            <p>路线与费用是预估信息；最终费用以实际订单为准。</p>
+          </div>
+          <div className="deskNote">
+            <span>02</span>
+            <p>本地规则回答附带可追溯的政策依据，不确定时会明确提示。</p>
+          </div>
+          {reservation && (
+            <section className="reservationCard">
+              <p className="overline">VEHICLE HOLD</p>
+              <b>{reservation.status === "cancelled" ? "预约已取消" : "车辆已为你保留"}</b>
+              <small>{reservation.vehicle_id} · {reservation.vehicle_status === "available" ? "已恢复可用" : reservation.status}</small>
+              {reservation.status !== "cancelled" && <button className="textAction" onClick={cancelReservation}>取消预约</button>}
+            </section>
+          )}
+          <section className="safetyNote">
+            <span>◇</span>
+            <div><b>安全优先</b><p>涉及订单、车辆或工单的变更，都会先向你展示影响，再请求确认。</p></div>
+          </section>
+        </aside>
       </section>
 
-      <footer><span>AMAP MCP ROUTE</span><span>REAL RAG EVIDENCE</span><span>SQLITE TOOLS</span><span>LANGGRAPH MVP</span><span>HITL</span><span>IDEMPOTENCY</span></footer>
+      {leadCandidate && (
+        <section className="confirmationSheet" aria-live="polite">
+          <div>
+            <p className="overline">LONG-TERM RENTAL</p>
+            <h2>确认提交长租意向？</h2>
+            <p>你选择的是 {leadCandidate.model}，约 {formatMoney(leadCandidate.estimated_total)}。提交后仅创建客服跟进线索，不会扣款或生成租赁订单。</p>
+          </div>
+          <div className="confirmationActions">
+            <button className="secondaryButton" onClick={() => setLeadCandidate(null)}>再想想</button>
+            <button className="primaryButton" onClick={createRentalLead}>确认意向</button>
+          </div>
+        </section>
+      )}
+
+      {incidentRun && <IncidentPanel run={incidentRun} busy={incidentBusy} onRespond={respondToIncident} />}
+
+      <footer>
+        <span>路线 · 高德地图服务</span>
+        <span>费用 · RideOps 预估</span>
+        <span>规则 · 本地政策证据</span>
+      </footer>
     </main>
+  );
+}
+
+function AnswerDetails({
+  result,
+  onReserve,
+  onIncident,
+  onSelectLead,
+}: {
+  result: CustomerResult;
+  onReserve: (vehicle: Vehicle) => void;
+  onIncident: (action: NonNullable<CustomerResult["next_action"]>) => void;
+  onSelectLead: (candidate: LongRentalCandidate) => void;
+}) {
+  return (
+    <div className="answerDetails">
+      {result.delegated_agents.length > 0 && (
+        <div className="agentTrail">
+          <span>已协同</span>
+          {result.delegated_agents.map((agent) => <b key={agent}>{agentLabels[agent] ?? agent}</b>)}
+        </div>
+      )}
+      {result.estimate && (
+        <div className="tripEstimate">
+          <div><span>路程</span><b>{result.estimate.distance_km} km</b></div>
+          <div><span>预计</span><b>{result.estimate.estimated_minutes} 分钟</b></div>
+          <div><span>费用</span><b>{formatMoney(result.estimate.estimated_fee)}</b></div>
+          <small>{result.estimate.source === "amap_mcp" ? "实时路线服务" : "路线预估"} · 费用由 RideOps 规则计算</small>
+        </div>
+      )}
+      {result.nearby_vehicles.length > 0 && (
+        <div className="vehicleList">
+          {result.nearby_vehicles.map((vehicle) => (
+            <article key={vehicle.vehicle_id}>
+              <span className="bikeGlyph">◒</span>
+              <div><b>{vehicle.model}</b><small>{vehicle.current_location} · 电量 {vehicle.battery_percent}%</small></div>
+              <button onClick={() => onReserve(vehicle)}>预约</button>
+            </article>
+          ))}
+        </div>
+      )}
+      {result.evidence.length > 0 && (
+        <details className="evidenceDisclosure">
+          <summary>查看回答依据 <span>{result.evidence.length} 条</span></summary>
+          {result.evidence.map((item) => <article key={item.document_id + item.section}><b>{item.title} · {item.section}</b><p>{item.content}</p><small>{item.source}</small></article>)}
+        </details>
+      )}
+      {result.long_rental_plan?.candidates?.length ? (
+        <div className="rentalList">
+          {result.long_rental_plan.candidates.map((candidate) => (
+            <article key={candidate.listing_id}>
+              <div><span>长租方案</span><b>{candidate.model}</b><small>剩余 {candidate.available_units} 辆 · {candidate.billing_basis}</small></div>
+              <div className="rentalPrice"><b>{formatMoney(candidate.estimated_total)}</b><small>{candidate.duration_days} 天含押金</small></div>
+              <button onClick={() => onSelectLead(candidate)}>咨询此方案</button>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {result.missing_fields.length > 0 && <p className="needMore">为了给出可靠答复，还需要：{result.missing_fields.join("、")}</p>}
+      {result.next_action && (
+        <section className="incidentPrompt">
+          <div><span>安全处理</span><b>我可以先为你建立事故处理流程</b><p>系统会先核对订单和规则，再把有影响的操作交由你确认。</p></div>
+          <button onClick={() => result.next_action && onIncident(result.next_action)}>开始处理</button>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function IncidentPanel({ run, busy, onRespond }: { run: IncidentRun; busy: boolean; onRespond: (approved: boolean) => void }) {
+  const completed = run.workflow_status === "completed";
+  const rejected = run.workflow_status === "safe_terminated";
+  return (
+    <section className="incidentPanel" aria-live="polite">
+      <div className="incidentTitle">
+        <div><p className="overline">SAFETY CONFIRMATION</p><h2>{completed ? "事故处理已完成" : rejected ? "本次操作未执行" : "请确认处理方案"}</h2></div>
+        <span className={completed ? "confirmed" : rejected ? "stopped" : "pending"}>{completed ? "已完成" : rejected ? "已取消" : "等待确认"}</span>
+      </div>
+      <p className="incidentMessage">{run.message}</p>
+      {!completed && !rejected && <div className="impactList">
+        {run.planned_actions.map((action) => <article key={action.action_id}><b>{action.title}</b><p>{action.reason}</p><small>影响：{action.risk}</small></article>)}
+      </div>}
+      {completed && <div className="completion"><b>处理结果已核验</b><span>订单计费：{run.final_state.order?.billing_status} · 车辆：{run.final_state.vehicle?.status} · 工单：{run.final_state.ticket?.ticket_id}</span></div>}
+      {!completed && !rejected && <div className="incidentActions"><button className="secondaryButton" disabled={busy} onClick={() => onRespond(false)}>暂不处理</button><button className="primaryButton" disabled={busy} onClick={() => onRespond(true)}>{busy ? "正在提交…" : "确认并继续"}</button></div>}
+    </section>
   );
 }
