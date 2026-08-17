@@ -423,6 +423,23 @@ class SQLiteBusinessRepository:
                 (session_id, role, content, json.dumps(payload or {}, ensure_ascii=False, default=str), datetime.now(timezone.utc).isoformat()),
             )
 
+    def list_customer_messages(self, session_id: str) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT message_id, role, content, payload_json, created_at FROM customer_messages WHERE session_id = ? ORDER BY message_id",
+                (session_id,),
+            ).fetchall()
+        return [
+            {
+                "message_id": row["message_id"],
+                "role": row["role"],
+                "content": row["content"],
+                "payload": json.loads(row["payload_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
     def append_event(self, run_id: str, event_type: str, payload: dict | None = None) -> dict:
         event = {"event_id": None, "run_id": run_id, "event_type": event_type, "payload": payload or {}, "created_at": datetime.now(timezone.utc).isoformat()}
         with self._connect() as connection:

@@ -7,7 +7,7 @@ from rideops.api.runs import create_runs_router
 from rideops.api.pretrip import create_pretrip_router
 from rideops.api.long_rental import create_long_rental_router
 from rideops.config import settings
-from rideops.domain.models import CustomerServiceQueryRequest, CustomerServiceResponse, CustomerSessionCreateRequest, CustomerSessionResponse
+from rideops.domain.models import CustomerServiceQueryRequest, CustomerServiceResponse, CustomerSessionCreateRequest, CustomerSessionDetailResponse, CustomerSessionResponse
 from rideops.integrations import MapProvider, build_map_provider
 from rideops.rag import RAGQuery, RAGResponse, build_default_service
 from rideops.rag.embeddings import build_embedding_provider
@@ -47,6 +47,14 @@ def create_app(database_path=None, map_provider: MapProvider | None = None) -> F
     @application.post("/api/customer-service/sessions", response_model=CustomerSessionResponse)
     def create_customer_service_session(request: CustomerSessionCreateRequest):
         return customer_service.create_session(request.user_id)
+
+    @application.get("/api/customer-service/sessions/{session_id}", response_model=CustomerSessionDetailResponse)
+    def get_customer_service_session(session_id: str, user_id: str = "usr_demo_001"):
+        try:
+            return customer_service.get_session(session_id, user_id)
+        except BusinessToolError as exc:
+            status_code = 404 if exc.code == "NOT_FOUND" else 403
+            raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": exc.message}) from exc
 
     @application.get("/health")
     def health() -> dict[str, str]:

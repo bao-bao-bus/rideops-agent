@@ -5,6 +5,7 @@
 ## 当前可用的会话 API
 
 - POST /api/customer-service/sessions：创建一条 SQLite 持久化客服会话。
+- GET /api/customer-service/sessions/{session_id}：按用户归属读取已保存的上下文和对话记录，用于页面刷新恢复。
 - POST /api/customer-service/query：传入 session_id 后，服务端会合并前文已确认的行程信息，并在没有新意图关键词时延续当前场景。
 - GET /api/agent-model/status：查看模型适配器是否仅预留、已配置或未来可启用；响应不包含 Key。
 

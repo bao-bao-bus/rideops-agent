@@ -220,6 +220,19 @@ class CustomerSessionResponse(DomainModel):
     created_at: datetime
 
 
+class CustomerSessionMessage(DomainModel):
+    message_id: int
+    role: str
+    content: str
+    payload: dict = Field(default_factory=dict)
+    created_at: datetime
+
+
+class CustomerSessionDetailResponse(CustomerSessionResponse):
+    context: dict = Field(default_factory=dict)
+    messages: list[CustomerSessionMessage] = Field(default_factory=list)
+
+
 class RunResponse(DomainModel):
     run_id: str
     workflow_status: str

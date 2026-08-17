@@ -116,3 +116,17 @@ def test_customer_session_checks_user_ownership(client):
         json={"session_id": session["session_id"], "user_id": "usr_other", "message": "附近有车吗？"},
     )
     assert response.status_code == 403
+
+
+def test_customer_session_history_can_be_reloaded_after_refresh(client):
+    session = client.post("/api/customer-service/sessions", json={"user_id": "usr_demo_001"}).json()
+    client.post(
+        "/api/customer-service/query",
+        json={"session_id": session["session_id"], "message": "共享电单车应该在哪里停车？"},
+    )
+    restored = client.get(f"/api/customer-service/sessions/{session['session_id']}")
+    assert restored.status_code == 200
+    body = restored.json()
+    assert body["session_id"] == session["session_id"]
+    assert [message["role"] for message in body["messages"]] == ["user", "assistant"]
+    assert body["messages"][1]["payload"]["delegated_agents"] == ["policy-agent"]

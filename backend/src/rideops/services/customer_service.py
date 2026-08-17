@@ -49,6 +49,21 @@ class CustomerService:
     def create_session(self, user_id: str) -> dict:
         return self.repository.create_customer_session(user_id)
 
+    def get_session(self, session_id: str, user_id: str) -> dict:
+        session = self.repository.get_customer_session(session_id)
+        if session is None:
+            raise BusinessToolError("NOT_FOUND", f"客服会话不存在: {session_id}")
+        if session["user_id"] != user_id:
+            raise BusinessToolError("FORBIDDEN", "无权访问其他用户的客服会话")
+        return {
+            "session_id": session["session_id"],
+            "user_id": session["user_id"],
+            "active_scenario": session["active_scenario"],
+            "created_at": session["created_at"],
+            "context": session["context"],
+            "messages": self.repository.list_customer_messages(session_id),
+        }
+
     @staticmethod
     def _active_scenario(scenario: str, previous: str | None) -> str | None:
         if scenario in {"route", "fare", "nearby_vehicles", "mixed"}:

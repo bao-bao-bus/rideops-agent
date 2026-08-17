@@ -90,6 +90,12 @@ type ChatMessage = {
   result?: CustomerResult;
 };
 
+type SavedSession = {
+  session_id: string;
+  context: Record<string, unknown>;
+  messages: Array<{ message_id: number; role: "user" | "assistant"; content: string; payload: Record<string, unknown> }>;
+};
+
 type ContextFields = {
   origin: string;
   destination: string;
@@ -133,6 +139,20 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: "CNY", maximumFractionDigits: 0 }).format(value);
 }
 
+function contextFromSession(value: Record<string, unknown>): ContextFields {
+  return {
+    origin: typeof value.origin === "string" ? value.origin : "",
+    destination: typeof value.destination === "string" ? value.destination : "",
+    location: typeof value.location === "string" ? value.location : "",
+    city: typeof value.city === "string" ? value.city : "",
+    durationDays: typeof value.duration_days === "number" ? String(value.duration_days) : "",
+    dailyBudget: typeof value.daily_budget === "number" ? String(value.daily_budget) : "",
+    orderId: typeof value.order_id === "string" ? value.order_id : "",
+    vehicleId: typeof value.vehicle_id === "string" ? value.vehicle_id : "",
+    description: typeof value.description === "string" ? value.description : "",
+  };
+}
+
 export default function Home() {
   const [message, setMessage] = useState("");
   const [context, setContext] = useState<ContextFields>(emptyContext);
@@ -158,25 +178,49 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      fetch(API_BASE + "/health"),
-      fetch(API_BASE + "/api/customer-service/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: "usr_demo_001" }),
-      }),
-    ])
-      .then(async ([health, session]) => {
-        if (!health.ok || !session.ok) throw new Error("session setup failed");
-        const body = (await session.json()) as { session_id: string };
+    async function restoreOrCreateSession() {
+      try {
+        const health = await fetch(API_BASE + "/health");
+        if (!health.ok) throw new Error("health check failed");
+        const rememberedSession = window.localStorage.getItem("rideops-customer-session");
+        if (rememberedSession) {
+          const restored = await fetch(API_BASE + "/api/customer-service/sessions/" + rememberedSession + "?user_id=usr_demo_001");
+          if (restored.ok) {
+            const body = (await restored.json()) as SavedSession;
+            if (active) {
+              setSessionId(body.session_id);
+              setContext(contextFromSession(body.context));
+              if (body.messages.length) {
+                setMessages(body.messages.map((saved) => ({
+                  id: "saved-" + saved.message_id,
+                  role: saved.role === "user" ? "customer" : "assistant",
+                  text: saved.content,
+                  result: typeof saved.payload.scenario === "string" ? saved.payload as CustomerResult : undefined,
+                })));
+              }
+              setApiState("ready");
+            }
+            return;
+          }
+          window.localStorage.removeItem("rideops-customer-session");
+        }
+        const created = await fetch(API_BASE + "/api/customer-service/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: "usr_demo_001" }),
+        });
+        if (!created.ok) throw new Error("session setup failed");
+        const body = (await created.json()) as { session_id: string };
+        window.localStorage.setItem("rideops-customer-session", body.session_id);
         if (active) {
           setApiState("ready");
           setSessionId(body.session_id);
         }
-      })
-      .catch(() => {
+      } catch {
         if (active) setApiState("offline");
-      });
+      }
+    }
+    void restoreOrCreateSession();
     return () => {
       active = false;
     };
