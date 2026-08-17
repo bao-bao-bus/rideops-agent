@@ -56,6 +56,12 @@ def create_runs_router(workflow: IncidentWorkflow, repository) -> APIRouter:
             "error_history": [],
             "workflow_status": "created",
         }
+        persisted_run_id = repository.create_run(run_id, state, request.idempotency_key)
+        if persisted_run_id != run_id:
+            existing_state = repository.get_run(persisted_run_id)
+            if existing_state is None:
+                raise HTTPException(status_code=409, detail="Run initialization is in progress; retry with the same idempotency key")
+            return state_to_response(existing_state, repository.list_events(persisted_run_id))
         repository.append_event(run_id, "run.created", {"user_id": request.user_id})
         state = workflow.prepare(state)
         repository.save_run(run_id, state)

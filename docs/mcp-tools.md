@@ -26,6 +26,7 @@ rideops-mcp
 写工具：
 
 - `reserve_vehicle`
+- `cancel_reservation`
 - `suspend_order_billing`
 - `mark_vehicle_unavailable`
 - `create_incident_ticket`

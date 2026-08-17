@@ -23,6 +23,10 @@ flowchart TD
     P4 --> P5[POST /api/pretrip/reserve]
     P5 --> P6[预约写工具 + idempotency_key]
     P6 --> DB[(SQLite：车辆与预约状态)]
+    DB --> P7{用户取消预约?}
+    P7 -->|是| P8[POST /api/pretrip/reservations/{id}/cancel]
+    P8 --> P9[归属校验 + 确认引用 + 幂等键]
+    P9 --> DB
 
     S -->|长租规划| L1[POST /api/long-rental/plan]
     L1 --> L2[SQLite：长租库存与价格]
@@ -72,7 +76,7 @@ flowchart TD
 - 当前默认使用 Mock Embedding，不调用外部模型 API。
 - 当前 RAG 使用 BM25 + Mock Vector + RRF，向量索引持久化在 SQLite。
 - 当前 Reranker 接口存在但默认关闭，没有用简单排序冒充真实 Reranker。
-- 当前路线查询已通过 MCP Client 调用高德官方 MCP；订单、预约、事故工单等 RideOps 私有业务仍是 Python 服务内普通工具。
+- 当前路线查询已通过 MCP Client 调用高德官方 MCP；订单、预约、事故工单等 RideOps 私有业务仍是 Python 服务内普通工具。预约取消会校验预约归属，并只在车辆仍是预约占用状态时恢复可用。
 - RideOps 私有业务工具已通过 stdio 暴露为 FastMCP Server。事故 HTTP 主流程目前仍直接调用 Service / Repository，以保持可恢复、可审计的闭环；后续若改为 MCP Client 调用，也会复用同一套 Service / Repository，而不是再造一套写入逻辑。
 - 当前前端使用普通 HTTP 请求，不是 SSE。
 - 当前业务数据和 Run 状态使用 SQLite，不需要 PostgreSQL、Redis 或 Docker。

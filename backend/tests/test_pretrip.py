@@ -41,3 +41,35 @@ def test_pretrip_reservation_conflict_is_explicit(client):
     second = client.post("/api/pretrip/reserve", json={"vehicle_id": "veh_demo_002", "idempotency_key": "pretrip-003:reserve"})
     assert first.status_code == 200
     assert second.status_code == 409
+
+
+def test_pretrip_reservation_can_be_cancelled_idempotently_and_releases_vehicle(client):
+    reservation = client.post("/api/pretrip/reserve", json={"vehicle_id": "veh_demo_002", "idempotency_key": "pretrip-004:reserve"}).json()
+    payload = {
+        "idempotency_key": "pretrip-004:cancel",
+        "approval_reference": "user-confirmed-cancel-004",
+    }
+    first = client.post(f"/api/pretrip/reservations/{reservation['reservation_id']}/cancel", json=payload)
+    second = client.post(f"/api/pretrip/reservations/{reservation['reservation_id']}/cancel", json=payload)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() == second.json()
+    assert first.json()["status"] == "cancelled"
+    assert first.json()["vehicle_status"] == "available"
+    snapshot = client.get("/api/demo-data").json()
+    assert snapshot["reservations"][0]["status"] == "cancelled"
+    assert next(vehicle for vehicle in snapshot["vehicles"] if vehicle["vehicle_id"] == "veh_demo_002")["status"] == "available"
+
+
+def test_pretrip_reservation_cancellation_checks_owner_and_key_scope(client):
+    reservation = client.post("/api/pretrip/reserve", json={"vehicle_id": "veh_demo_002", "idempotency_key": "pretrip-005:reserve"}).json()
+    forbidden = client.post(
+        f"/api/pretrip/reservations/{reservation['reservation_id']}/cancel",
+        json={"user_id": "usr_other", "idempotency_key": "pretrip-005:forbidden", "approval_reference": "user-confirmed"},
+    )
+    reused_key = client.post(
+        f"/api/pretrip/reservations/{reservation['reservation_id']}/cancel",
+        json={"idempotency_key": "pretrip-005:reserve", "approval_reference": "user-confirmed"},
+    )
+    assert forbidden.status_code == 403
+    assert reused_key.status_code == 409

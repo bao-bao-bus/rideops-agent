@@ -91,6 +91,12 @@ def build_server() -> FastMCP:
         return tools.reserve_vehicle(vehicle_id, user_id, idempotency_key)
 
     @server.tool()
+    def cancel_reservation(reservation_id: str, user_id: str, idempotency_key: str, approval_reference: str) -> dict:
+        """取消本人尚未使用的预约，并回读车辆可用状态。必须提供确认引用和幂等键。"""
+        _require_approval(approval_reference)
+        return tools.cancel_reservation(reservation_id, user_id, idempotency_key)
+
+    @server.tool()
     def suspend_order_billing(order_id: str, idempotency_key: str, approval_reference: str) -> dict:
         """暂停订单计费。必须提供人工确认引用和幂等键。"""
         _require_approval(approval_reference)

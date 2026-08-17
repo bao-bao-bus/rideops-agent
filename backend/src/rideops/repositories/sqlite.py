@@ -88,6 +88,11 @@ class SQLiteBusinessRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS workflow_run_request_keys (
+                    idempotency_key TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS run_events (
                     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
@@ -250,6 +255,9 @@ class SQLiteBusinessRepository:
     def reserve_vehicle(self, vehicle_id: str, user_id: str, idempotency_key: str) -> dict:
         return self._idempotent_write(idempotency_key, "reserve_vehicle", lambda connection: self._reserve_vehicle(connection, vehicle_id, user_id, idempotency_key))
 
+    def cancel_reservation(self, reservation_id: str, user_id: str, idempotency_key: str) -> dict:
+        return self._idempotent_write(idempotency_key, "cancel_reservation", lambda connection: self._cancel_reservation(connection, reservation_id, user_id))
+
     def create_long_rental_lead(self, listing_id: str, user_id: str, duration_days: int, start_date: str | None, approval_reference: str, idempotency_key: str) -> dict:
         return self._idempotent_write(
             idempotency_key,
@@ -294,6 +302,27 @@ class SQLiteBusinessRepository:
         connection.execute("INSERT INTO reservations VALUES (?, ?, ?, ?, ?, ?)", (reservation_id, vehicle_id, user_id, "reserved", datetime.now(timezone.utc).isoformat(), idempotency_key))
         return {"reservation_id": reservation_id, "vehicle_id": vehicle_id, "status": "reserved"}
 
+    def _cancel_reservation(self, connection: sqlite3.Connection, reservation_id: str, user_id: str) -> dict:
+        reservation = connection.execute("SELECT reservation_id, vehicle_id, user_id, status FROM reservations WHERE reservation_id = ?", (reservation_id,)).fetchone()
+        if reservation is None:
+            raise BusinessToolError("NOT_FOUND", f"预约不存在: {reservation_id}")
+        if reservation["user_id"] != user_id:
+            raise BusinessToolError("FORBIDDEN", "无权取消其他用户的预约")
+        if reservation["status"] != "reserved":
+            raise BusinessToolError("CONFLICT", f"预约当前不可取消: {reservation_id}")
+        connection.execute("UPDATE reservations SET status = 'cancelled' WHERE reservation_id = ?", (reservation_id,))
+        vehicle = connection.execute("SELECT status FROM vehicles WHERE vehicle_id = ?", (reservation["vehicle_id"],)).fetchone()
+        vehicle_status = vehicle["status"] if vehicle else "unknown"
+        if vehicle_status == "in_use":
+            connection.execute("UPDATE vehicles SET status = 'available' WHERE vehicle_id = ?", (reservation["vehicle_id"],))
+            vehicle_status = "available"
+        return {
+            "reservation_id": reservation_id,
+            "vehicle_id": reservation["vehicle_id"],
+            "status": "cancelled",
+            "vehicle_status": vehicle_status,
+        }
+
     def _create_incident_ticket(self, connection: sqlite3.Connection, order_id: str, user_id: str, description: str, idempotency_key: str) -> dict:
         if connection.execute("SELECT 1 FROM orders WHERE order_id = ?", (order_id,)).fetchone() is None:
             raise BusinessToolError("NOT_FOUND", f"订单不存在: {order_id}")
@@ -306,8 +335,10 @@ class SQLiteBusinessRepository:
         if not idempotency_key:
             raise BusinessToolError("VALIDATION_ERROR", "必须提供 idempotency_key")
         with self._connect() as connection:
-            existing = connection.execute("SELECT result_json FROM idempotency_records WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+            existing = connection.execute("SELECT operation, result_json FROM idempotency_records WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
             if existing:
+                if existing["operation"] != operation:
+                    raise BusinessToolError("CONFLICT", "idempotency_key 已用于其他业务操作")
                 return json.loads(existing["result_json"])
             result = action(connection)
             connection.execute("INSERT INTO idempotency_records VALUES (?, ?, ?, ?)", (idempotency_key, operation, json.dumps(result), datetime.now(timezone.utc).isoformat()))
@@ -318,6 +349,20 @@ class SQLiteBusinessRepository:
         payload = json.dumps(state, ensure_ascii=False, default=str)
         with self._connect() as connection:
             connection.execute("INSERT INTO workflow_runs(run_id, state_json, created_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at", (run_id, payload, now, now))
+
+    def create_run(self, run_id: str, state: dict, idempotency_key: str | None = None) -> str:
+        now = datetime.now(timezone.utc).isoformat()
+        payload = json.dumps(state, ensure_ascii=False, default=str)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if idempotency_key:
+                existing = connection.execute("SELECT run_id FROM workflow_run_request_keys WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+                if existing:
+                    return existing["run_id"]
+            connection.execute("INSERT INTO workflow_runs(run_id, state_json, created_at, updated_at) VALUES (?, ?, ?, ?)", (run_id, payload, now, now))
+            if idempotency_key:
+                connection.execute("INSERT INTO workflow_run_request_keys VALUES (?, ?, ?)", (idempotency_key, run_id, now))
+            return run_id
 
     def get_run(self, run_id: str) -> dict | None:
         with self._connect() as connection:
@@ -342,4 +387,6 @@ class SQLiteBusinessRepository:
             vehicles = [self._vehicle(row).model_dump(mode="json") for row in connection.execute("SELECT * FROM vehicles").fetchall()]
             tickets = [self._ticket(row).model_dump(mode="json") for row in connection.execute("SELECT * FROM incident_tickets").fetchall()]
             inventory = [item.model_dump(mode="json") for item in self.list_inventory()]
-            return {"orders": orders, "vehicles": vehicles, "inventory": inventory, "tickets": tickets}
+            reservations = [dict(row) for row in connection.execute("SELECT * FROM reservations ORDER BY created_at DESC").fetchall()]
+            long_rental_leads = [dict(row) for row in connection.execute("SELECT * FROM long_rental_leads ORDER BY created_at DESC").fetchall()]
+            return {"orders": orders, "vehicles": vehicles, "inventory": inventory, "tickets": tickets, "reservations": reservations, "long_rental_leads": long_rental_leads}

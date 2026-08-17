@@ -13,6 +13,7 @@ def test_rideops_mcp_server_exposes_customer_service_tools():
         "plan_long_rental",
         "create_long_rental_lead",
         "reserve_vehicle",
+        "cancel_reservation",
         "suspend_order_billing",
         "mark_vehicle_unavailable",
         "create_incident_ticket",

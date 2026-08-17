@@ -78,6 +78,7 @@ class IncidentTicket(DomainModel):
 class IncidentRunRequest(DomainModel):
     user_id: str = "usr_demo_001"
     message: str = Field(min_length=1)
+    idempotency_key: str | None = Field(default=None, min_length=1)
     order_id: str | None = None
     vehicle_id: str | None = None
     location: str | None = None
@@ -106,6 +107,12 @@ class PreTripReservationRequest(DomainModel):
     user_id: str = "usr_demo_001"
     vehicle_id: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
+
+
+class PreTripReservationCancellationRequest(DomainModel):
+    user_id: str = "usr_demo_001"
+    idempotency_key: str = Field(min_length=1)
+    approval_reference: str = Field(min_length=1)
 
 
 class PreTripPlanResponse(DomainModel):

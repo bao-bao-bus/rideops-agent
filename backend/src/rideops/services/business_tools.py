@@ -18,6 +18,10 @@ class VehicleLookupInput(ToolInput):
     vehicle_id: str = Field(min_length=1)
 
 
+class ReservationLookupInput(ToolInput):
+    reservation_id: str = Field(min_length=1)
+
+
 class WriteInput(ToolInput):
     idempotency_key: str = Field(min_length=1)
 
@@ -66,6 +70,13 @@ class BusinessTools:
         VehicleLookupInput(vehicle_id=vehicle_id)
         WriteInput(idempotency_key=idempotency_key)
         return self.repository.reserve_vehicle(vehicle_id, user_id, idempotency_key)
+
+    def cancel_reservation(self, reservation_id: str, user_id: str, idempotency_key: str) -> dict:
+        ReservationLookupInput(reservation_id=reservation_id)
+        WriteInput(idempotency_key=idempotency_key)
+        if not user_id:
+            raise ValueError("user_id cannot be empty")
+        return self.repository.cancel_reservation(reservation_id, user_id, idempotency_key)
 
     def suspend_order_billing(self, order_id: str, idempotency_key: str) -> dict:
         OrderLookupInput(order_id=order_id)

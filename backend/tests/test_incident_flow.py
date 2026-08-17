@@ -58,6 +58,16 @@ def test_run_events_record_decisions_and_tool_trace(client):
     assert len(fetched.json()["events"]) == len(completed["events"])
 
 
+def test_incident_run_creation_is_idempotent_when_client_provides_key(client):
+    payload = run_request() | {"idempotency_key": "incident-create-001"}
+    first = client.post("/api/runs", json=payload)
+    second = client.post("/api/runs", json=payload)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["run_id"] == second.json()["run_id"]
+    assert [event["event_type"] for event in second.json()["events"]].count("run.created") == 1
+
+
 def test_approval_executes_writes_and_reads_back_sqlite_state(client):
     created = client.post("/api/runs", json=run_request()).json()
     run_id = created["run_id"]

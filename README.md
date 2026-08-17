@@ -54,7 +54,7 @@ python evals/run_rag_eval.py --output evals/mock-baseline.json
 
 这些数字仅用于后续比较真实 Embedding、BM25、Vector、Hybrid+RRF 和 Reranker 版本，不代表生产能力，也不作为简历指标。
 
-当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、路线/费用预估、长租库存/价格规划和幂等预约。事故流程现在支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。出行前路线已经支持通过 MCP Client 调用高德官方远程 MCP；没有配置 Provider 或 API Key 时自动使用合成路线。费用仍由 RideOps 自己计算，不把地图路线费用冒充共享出行最终价格。新增统一只读客服查询接口，能够根据用户问题查询路线、费用、附近车辆和本地政策，并返回来源、证据和缺失字段。长租规划支持查询库存和价格；用户确认后可带确认引用和幂等键创建后续跟进线索，但不会直接创建租赁订单。当前尚未实现：LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
+当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、路线/费用预估、长租库存/价格规划和幂等预约/取消。事故 Run 在调用方提供请求幂等键时可安全重试，不会创建两条独立处理链路；事故流程支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。出行前路线已经支持通过 MCP Client 调用高德官方远程 MCP；没有配置 Provider 或 API Key 时自动使用合成路线。费用仍由 RideOps 自己计算，不把地图路线费用冒充共享出行最终价格。新增统一只读客服查询接口，能够根据用户问题查询路线、费用、附近车辆和本地政策，并返回来源、证据和缺失字段。长租规划支持查询库存和价格；用户确认后可带确认引用和幂等键创建后续跟进线索，但不会直接创建租赁订单。当前尚未实现：LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
 
 ## 目录结构
 
@@ -157,12 +157,17 @@ POST /api/customer-service/query
 
 当事故信息不完整时，`provide-info` 会将用户补充的信息写回当前 Run，并重新进入准备阶段；只有进入人工审批后，`resume` 才会执行写操作。Run 事件保存在 SQLite 的 `run_events` 表中，当前以 JSON 接口提供，后续可在不改变业务事件模型的情况下接入 SSE。
 
+调用 `POST /api/runs` 时可以额外传入 `idempotency_key`。相同键的重复请求返回已有 Run，不会重新生成事故写入动作；不传时保留原有兼容行为。
+
 当前出行前接口：
 
 ```text
 POST /api/pretrip/plan
 POST /api/pretrip/reserve
+POST /api/pretrip/reservations/{reservation_id}/cancel
 ```
+
+预约和取消都使用幂等键。取消操作还要求确认引用，并校验预约归属；成功后会将尚未使用的车辆恢复为可用状态，响应中返回预约和车辆状态回读。
 
 当前长租接口：
 
@@ -177,7 +182,7 @@ POST /api/long-rental/leads
 
 ## RideOps 自有 MCP
 
-自有 MCP Server 已提供 11 个共享出行客服工具，包含订单、车辆、路线/费用、政策检索和事故、预约、长租留资写操作。启动方式：
+自有 MCP Server 已提供 12 个共享出行客服工具，包含订单、车辆、路线/费用、政策检索和事故、预约、长租留资写操作。启动方式：
 
 ```bash
 cd backend
@@ -189,8 +194,8 @@ rideops-mcp
 
 ## 下一阶段
 
-下一轮使用 OpenAI-compatible API 实际运行真实 Embedding，并重新跑评估对比；确认 RAG 稳定后，再进入 FastMCP、PostgreSQL、SSE 断线恢复等加分项。
+先继续收口单编排器 MVP 的异常边界、运行审计与端到端演示；稳定后再设计多 Agent 的职责拆分。外部模型 API、真实 Embedding、PostgreSQL、Redis 和 SSE 断线恢复均保留为后续增强，按需单独引入。
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、MCP 路线查询、统一客服查询、长租库存/价格规划与确认线索、费用预估和幂等预约接口；使用 pytest 覆盖 56 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、预约创建/取消、MCP 路线查询、统一客服查询、长租库存/价格规划与确认线索和费用预估接口；使用 pytest 覆盖 59 个测试场景。
