@@ -10,7 +10,7 @@ def test_health(client):
 def test_skill_list_has_two_skills(client):
     response = client.get("/api/skills")
     assert response.status_code == 200
-    assert {item["name"] for item in response.json()["skills"]} == {"accident-handling", "long-rental-planning"}
+    assert {item["name"] for item in response.json()["skills"]} == {"accident-handling", "long-rental-planning", "pretrip-support"}
 
 
 @pytest.mark.parametrize("message, expected", [

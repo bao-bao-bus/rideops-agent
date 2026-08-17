@@ -9,7 +9,7 @@
 - FastAPI 应用骨架与 `GET /health`
 - Pydantic v2 领域模型：订单、车辆、库存、事故工单
 - 本地合成业务数据仓库，不连接真实企业数据库
-- 两个 Skill：`accident-handling`、`long-rental-planning`
+- 三个 Skill：`accident-handling`、`long-rental-planning`、`pretrip-support`
 - Skill Registry：启动时只扫描名称和描述
 - Skill Router：基于业务关键词路由，命中后再加载完整 `SKILL.md`
 - references 和 templates 按需读取
@@ -54,7 +54,7 @@ python evals/run_rag_eval.py --output evals/mock-baseline.json
 
 这些数字仅用于后续比较真实 Embedding、BM25、Vector、Hybrid+RRF 和 Reranker 版本，不代表生产能力，也不作为简历指标。
 
-当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、路线/费用预估和幂等预约。事故流程现在支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。出行前路线已经支持通过 MCP Client 调用高德官方远程 MCP；没有配置 Provider 或 API Key 时自动使用合成路线。费用仍由 RideOps 自己计算，不把地图路线费用冒充共享出行最终价格。当前尚未实现：自有 FastMCP 业务 Server、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
+当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、路线/费用预估和幂等预约。事故流程现在支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。出行前路线已经支持通过 MCP Client 调用高德官方远程 MCP；没有配置 Provider 或 API Key 时自动使用合成路线。费用仍由 RideOps 自己计算，不把地图路线费用冒充共享出行最终价格。新增统一只读客服查询接口，能够根据用户问题查询路线、费用、附近车辆和本地政策，并返回来源、证据和缺失字段。当前尚未实现：自有 FastMCP 业务 Server、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
 
 ## 目录结构
 
@@ -147,6 +147,14 @@ POST /api/runs/{run_id}/provide-info
 POST /api/runs/{run_id}/resume
 ```
 
+统一客服查询接口：
+
+```text
+POST /api/customer-service/query
+```
+
+只读查询不触发审批；路线结果标注 `amap_mcp` 或合成回退来源，费用结果标注 RideOps 计价来源，政策结果返回 RAG 证据。出发地、目的地或当前位置缺失时返回 `missing_fields`，不会猜测用户条件。
+
 当事故信息不完整时，`provide-info` 会将用户补充的信息写回当前 Run，并重新进入准备阶段；只有进入人工审批后，`resume` 才会执行写操作。Run 事件保存在 SQLite 的 `run_events` 表中，当前以 JSON 接口提供，后续可在不改变业务事件模型的情况下接入 SSE。
 
 当前出行前接口：
@@ -164,4 +172,4 @@ POST /api/pretrip/reserve
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、MCP 路线查询、费用预估和幂等预约接口；使用 pytest 覆盖 44 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、MCP 路线查询、统一客服查询、费用预估和幂等预约接口；使用 pytest 覆盖 49 个测试场景。

@@ -104,6 +104,28 @@ class PreTripPlanResponse(DomainModel):
     reservation: dict | None = None
 
 
+class CustomerServiceQueryRequest(DomainModel):
+    user_id: str = "usr_demo_001"
+    message: str = Field(min_length=1)
+    origin: str | None = None
+    destination: str | None = None
+    location: str | None = None
+    city: str | None = None
+    vehicle_type: str | None = None
+
+
+class CustomerServiceResponse(DomainModel):
+    scenario: str
+    selected_skill: str | None = None
+    matched_terms: list[str] = Field(default_factory=list)
+    answerable: bool = False
+    missing_fields: list[str] = Field(default_factory=list)
+    message: str
+    evidence: list[dict] = Field(default_factory=list)
+    nearby_vehicles: list[dict] = Field(default_factory=list)
+    estimate: dict | None = None
+
+
 class RunResponse(DomainModel):
     run_id: str
     workflow_status: str

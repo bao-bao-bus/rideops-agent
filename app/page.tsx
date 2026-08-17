@@ -43,6 +43,27 @@ type RunData = {
   message: string;
 };
 
+type CustomerEvidence = {
+  document_id: string;
+  title: string;
+  section: string;
+  content: string;
+  score: number;
+  source: string;
+};
+
+type CustomerResult = {
+  scenario: string;
+  selected_skill: string | null;
+  matched_terms: string[];
+  answerable: boolean;
+  missing_fields: string[];
+  message: string;
+  evidence: CustomerEvidence[];
+  nearby_vehicles: Array<{ vehicle_id: string; model: string; status: string; battery_percent: number; current_location: string }>;
+  estimate: { distance_km: number; estimated_minutes: number; estimated_fee: number; currency: string; source: string; pricing_source: string; fallback_reason?: string } | null;
+};
+
 const demoRequest = {
   user_id: "usr_demo_001",
   message: "我在上海静安区骑车发生碰撞，手臂有轻微擦伤，车锁损坏，订单仍在计费，怎么办？",
@@ -75,6 +96,13 @@ function stepState(run: RunData | null, index: number) {
 
 export default function Home() {
   const [run, setRun] = useState<RunData | null>(null);
+  const [customerMessage, setCustomerMessage] = useState("从静安区到人民广场怎么走，大概要多少钱？");
+  const [customerOrigin, setCustomerOrigin] = useState("上海市静安区");
+  const [customerDestination, setCustomerDestination] = useState("上海市人民广场");
+  const [customerLocation, setCustomerLocation] = useState("上海市静安区");
+  const [customerCity, setCustomerCity] = useState("上海");
+  const [customerResult, setCustomerResult] = useState<CustomerResult | null>(null);
+  const [customerLoading, setCustomerLoading] = useState(false);
   const [tab, setTab] = useState<"plan" | "evidence" | "audit">("plan");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -132,6 +160,49 @@ export default function Home() {
     }
   }
 
+  async function askCustomer() {
+    setCustomerLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/customer-service/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: customerMessage,
+          origin: customerOrigin || undefined,
+          destination: customerDestination || undefined,
+          location: customerLocation || undefined,
+          city: customerCity || undefined,
+        }),
+      });
+      if (!response.ok) throw new Error(`后端返回 ${response.status}`);
+      setCustomerResult(await response.json() as CustomerResult);
+    } catch (reason) {
+      setError(`客服查询失败：${reason instanceof Error ? reason.message : "未知错误"}`);
+    } finally {
+      setCustomerLoading(false);
+    }
+  }
+
+  function useCustomerExample(kind: "route" | "nearby" | "policy") {
+    if (kind === "route") {
+      setCustomerMessage("从静安区到人民广场怎么走，大概要多少钱？");
+      setCustomerOrigin("上海市静安区");
+      setCustomerDestination("上海市人民广场");
+    } else if (kind === "nearby") {
+      setCustomerMessage("附近有没有可用车辆？");
+      setCustomerOrigin("");
+      setCustomerDestination("");
+      setCustomerLocation("上海市静安区");
+    } else {
+      setCustomerMessage("共享电单车应该在哪里停车？");
+      setCustomerOrigin("");
+      setCustomerDestination("");
+      setCustomerCity("上海");
+    }
+    setCustomerResult(null);
+  }
+
   return (
     <main>
       <header className="topbar">
@@ -145,6 +216,32 @@ export default function Home() {
       </section>
 
       {error && <div className="result rejectedResult">{error}。请确认后端已启动：<code>uvicorn rideops.api.app:app --reload</code></div>}
+
+      <section className="customer panel">
+        <div className="panelTitle"><span>00</span><div><b>出行客服查询</b><small>路线 · 费用 · 附近车辆 · 本地政策</small></div></div>
+        <div className="customerBody">
+          <div className="customerIntro">
+            <p className="eyebrow">READ-ONLY CUSTOMER SERVICE</p>
+            <h2>先把问题答清楚，<br />再决定是否执行动作。</h2>
+            <p>查询类问题不需要审批；路线来自高德 MCP，费用由 RideOps 计价，政策回答必须带有知识库证据。</p>
+            <div className="quickQueries"><button onClick={() => useCustomerExample("route")}>路线和费用</button><button onClick={() => useCustomerExample("nearby")}>附近车辆</button><button onClick={() => useCustomerExample("policy")}>停车政策</button></div>
+          </div>
+          <div className="customerForm">
+            <label>用户问题<input value={customerMessage} onChange={(event) => setCustomerMessage(event.target.value)} /></label>
+            <div className="inputRow"><label>出发地<input placeholder="路线问题可填" value={customerOrigin} onChange={(event) => setCustomerOrigin(event.target.value)} /></label><label>目的地<input placeholder="路线问题可填" value={customerDestination} onChange={(event) => setCustomerDestination(event.target.value)} /></label></div>
+            <div className="inputRow"><label>当前位置<input placeholder="附近车辆问题可填" value={customerLocation} onChange={(event) => setCustomerLocation(event.target.value)} /></label><label>城市<input placeholder="政策问题可填" value={customerCity} onChange={(event) => setCustomerCity(event.target.value)} /></label></div>
+            <button className="primary customerSubmit" disabled={customerLoading || !customerMessage.trim()} onClick={askCustomer}>{customerLoading ? "查询中..." : "查询客服能力"}</button>
+          </div>
+        </div>
+        {customerResult && <div className="customerResult">
+          <div className="customerResultHead"><div><span className="resultKicker">{customerResult.scenario.toUpperCase()}</span><h3>{customerResult.message}</h3></div><span className={`answerPill ${customerResult.answerable ? "answerable" : "unanswerable"}`}>{customerResult.answerable ? "EVIDENCE READY" : "NEEDS INPUT"}</span></div>
+          {customerResult.estimate && <div className="customerMetrics"><div><span>距离</span><b>{customerResult.estimate.distance_km} km</b></div><div><span>预计时间</span><b>{customerResult.estimate.estimated_minutes} min</b></div><div><span>预估费用</span><b>¥ {customerResult.estimate.estimated_fee}</b></div><div><span>数据来源</span><b>{customerResult.estimate.source}</b></div></div>}
+          {customerResult.estimate?.fallback_reason && <div className="result rejectedResult">地图服务暂时不可用，已回退到合成路线：{customerResult.estimate.fallback_reason}</div>}
+          {customerResult.nearby_vehicles.length > 0 && <div className="customerVehicles">{customerResult.nearby_vehicles.map((vehicle) => <article key={vehicle.vehicle_id}><b>{vehicle.vehicle_id}</b><span>{vehicle.model}</span><small>{vehicle.current_location} · 电量 {vehicle.battery_percent}%</small></article>)}</div>}
+          {customerResult.evidence.length > 0 && <div className="customerEvidence"><p className="resultKicker">POLICY EVIDENCE</p>{customerResult.evidence.map((item) => <article key={`${item.document_id}-${item.section}`}><b>{item.title} · {item.section}</b><p>{item.content}</p><small>{item.source} · score {item.score}</small></article>)}</div>}
+          {customerResult.missing_fields.length > 0 && <div className="result rejectedResult">还需要补充：{customerResult.missing_fields.join("、")}</div>}
+        </div>}
+      </section>
 
       <section className="workspace">
         <div className="chat panel">
@@ -174,7 +271,7 @@ export default function Home() {
         {run?.workflow_status === "safe_terminated" && <div className="result rejectedResult">流程已安全终止，未调用任何写工具。</div>}
       </section>
 
-      <footer><span>REAL RAG EVIDENCE</span><span>SQLITE TOOLS</span><span>LANGGRAPH MVP</span><span>HITL</span><span>IDEMPOTENCY</span></footer>
+      <footer><span>AMAP MCP ROUTE</span><span>REAL RAG EVIDENCE</span><span>SQLITE TOOLS</span><span>LANGGRAPH MVP</span><span>HITL</span><span>IDEMPOTENCY</span></footer>
     </main>
   );
 }

@@ -18,6 +18,7 @@ class SkillRouter:
     RULES = {
         "accident-handling": ("事故", "故障", "损坏", "碰撞", "受伤", "车辆问题"),
         "long-rental-planning": ("长租", "租期", "月租", "长期租赁", "续租", "租车计划"),
+        "pretrip-support": ("怎么去", "怎么走", "路线", "导航", "费用", "多少钱", "价格", "附近", "可用车辆", "停车", "出行", "骑行", "规定", "政策"),
     }
 
     def __init__(self, registry: SkillRegistry) -> None:
