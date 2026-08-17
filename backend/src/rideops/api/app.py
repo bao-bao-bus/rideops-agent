@@ -5,6 +5,7 @@ from rideops.agents import IncidentWorkflow
 from rideops.api.runs import create_runs_router
 from rideops.config import settings
 from rideops.rag import RAGQuery, RAGResponse, build_default_service
+from rideops.rag.embeddings import build_embedding_provider
 from rideops.repositories import SQLiteBusinessRepository
 from rideops.services import BusinessTools
 from rideops.skills import SkillRegistry, SkillRouter
@@ -12,7 +13,7 @@ from rideops.skills.router import SkillRouteRequest, SkillRouteResult
 
 registry = SkillRegistry(settings.skills_dir)
 router = SkillRouter(registry)
-rag_service = build_default_service(settings.policies_dir)
+rag_service = build_default_service(settings.policies_dir, settings.rag_index_path, build_embedding_provider(settings))
 
 
 def create_app(database_path=None) -> FastAPI:

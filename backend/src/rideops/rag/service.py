@@ -2,11 +2,12 @@ from pathlib import Path
 
 from .models import RAGResponse
 from .parser import load_markdown_documents
-from .retriever import InMemoryRetriever
+from .embeddings import EmbeddingProvider
+from .retriever import HybridRetriever
 
 
 class RAGService:
-    def __init__(self, retriever: InMemoryRetriever) -> None:
+    def __init__(self, retriever: HybridRetriever) -> None:
         self.retriever = retriever
 
     def query(self, query: str, top_k: int = 3, min_score: float = 0.18) -> RAGResponse:
@@ -16,7 +17,9 @@ class RAGService:
         return RAGResponse(query=query, answerable=True, evidence=evidence)
 
 
-def build_default_service(documents_dir: Path) -> RAGService:
-    retriever = InMemoryRetriever()
+def build_default_service(documents_dir: Path, index_path: Path | None = None, embedding_provider: EmbeddingProvider | None = None) -> RAGService:
+    if index_path is None:
+        index_path = Path(documents_dir).parents[1] / "data" / "rag-index.db"
+    retriever = HybridRetriever(index_path=index_path, embedding_provider=embedding_provider)
     retriever.add_documents(load_markdown_documents(documents_dir))
     return RAGService(retriever)

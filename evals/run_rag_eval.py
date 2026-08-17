@@ -40,6 +40,7 @@ def evaluate(cases: list[dict], min_score: float = 0.18) -> dict[str, float | in
         routing_correct += int(routed_name == case["expected_skill"])
     total_retrieval = len(retrieval_cases)
     return {
+        "retrieval_version": "bm25+mock-vector+rrf",
         "case_count": len(cases),
         "retrieval_case_count": total_retrieval,
         "hit_at_1": round(hit_counts[1] / total_retrieval, 4),

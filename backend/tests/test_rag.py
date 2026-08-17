@@ -1,6 +1,8 @@
 from rideops.rag.chunker import split_markdown
-from rideops.rag.embeddings import MockEmbedding, cosine_similarity
+from rideops.rag.bm25 import BM25Index
+from rideops.rag.embeddings import MockEmbedding, OpenAICompatibleEmbeddingProvider, cosine_similarity
 from rideops.rag.parser import parse_markdown
+from rideops.rag.vector_store import SQLiteVectorStore
 
 
 def test_policy_parser_preserves_title_and_source(tmp_path):
@@ -54,3 +56,32 @@ def test_rag_refuses_when_no_evidence(client):
 def test_rag_query_validates_parameters(client):
     assert client.post("/api/rag/search", json={"query": "事故", "top_k": 0}).status_code == 422
     assert client.post("/api/rag/search", json={"query": "事故", "unexpected": True}).status_code == 422
+
+
+def test_bm25_uses_chinese_token_coverage_and_keeps_business_terms():
+    index = BM25Index()
+    index.add("accident", "事故发生后应先确认人员安全并记录订单号")
+    index.add("rental", "长租方案需要确认租期、城市、车型和预算")
+    assert index.search("订单号事故怎么处理", top_k=1)[0][0] == "accident"
+    assert index.search("完全不相关的股票走势", top_k=5) == []
+
+
+def test_sqlite_vector_index_survives_reopen(tmp_path):
+    from rideops.rag.chunker import DocumentChunk
+
+    chunk = DocumentChunk("demo", "Demo", "Safety", "事故后确认人员安全", "demo.md")
+    provider = MockEmbedding()
+    first = SQLiteVectorStore(tmp_path / "vectors.db")
+    first.sync([chunk], provider)
+    second = SQLiteVectorStore(tmp_path / "vectors.db")
+    assert second.all()[0].chunk.content == chunk.content
+    assert second.search(provider.embed_query("事故安全"), top_k=1)[0][0] == first.all()[0].chunk_id
+
+
+def test_real_embedding_adapter_requires_explicit_credentials():
+    try:
+        OpenAICompatibleEmbeddingProvider("", "", "model")
+    except ValueError as error:
+        assert "EMBEDDING_BASE_URL" in str(error)
+    else:
+        raise AssertionError("real adapter must not start without credentials")
