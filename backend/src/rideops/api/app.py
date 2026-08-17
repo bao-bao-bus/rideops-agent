@@ -5,6 +5,7 @@ from rideops.agents import IncidentWorkflow
 from rideops.api.runs import create_runs_router
 from rideops.api.pretrip import create_pretrip_router
 from rideops.config import settings
+from rideops.integrations import build_map_provider
 from rideops.rag import RAGQuery, RAGResponse, build_default_service
 from rideops.rag.embeddings import build_embedding_provider
 from rideops.repositories import SQLiteBusinessRepository
@@ -19,11 +20,13 @@ rag_service = build_default_service(settings.policies_dir, settings.rag_index_pa
 
 def create_app(database_path=None) -> FastAPI:
     business_data = SQLiteBusinessRepository(database_path or settings.database_path)
-    incident_workflow = IncidentWorkflow(rag_service, business_data, router, BusinessTools(business_data), event_sink=business_data.append_event)
+    map_provider = build_map_provider(settings.map_provider, settings.amap_api_key)
+    business_tools = BusinessTools(business_data, map_provider=map_provider)
+    incident_workflow = IncidentWorkflow(rag_service, business_data, router, business_tools, event_sink=business_data.append_event)
     application = FastAPI(title=settings.app_name, version="0.2.0")
     application.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], allow_methods=["*"], allow_headers=["*"])
     application.include_router(create_runs_router(incident_workflow, business_data))
-    application.include_router(create_pretrip_router(BusinessTools(business_data)))
+    application.include_router(create_pretrip_router(business_tools))
 
     @application.get("/health")
     def health() -> dict[str, str]:

@@ -1,6 +1,8 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 from rideops.domain.models import IncidentTicket, Order, Vehicle
+from rideops.integrations import MapProvider, SyntheticMapProvider
+from rideops.integrations.maps import MapProviderError
 from rideops.repositories import SQLiteBusinessRepository
 
 
@@ -23,8 +25,9 @@ class WriteInput(ToolInput):
 class BusinessTools:
     """Ordinary in-process tools. FastMCP can wrap these contracts later."""
 
-    def __init__(self, repository: SQLiteBusinessRepository) -> None:
+    def __init__(self, repository: SQLiteBusinessRepository, map_provider: MapProvider | None = None) -> None:
         self.repository = repository
+        self.map_provider = map_provider or SyntheticMapProvider()
 
     def get_active_order(self, order_id: str) -> Order | None:
         OrderLookupInput(order_id=order_id)
@@ -51,8 +54,13 @@ class BusinessTools:
     def estimate_trip(self, origin: str, destination: str) -> dict:
         if not origin or not destination:
             raise ValueError("origin and destination are required")
-        # Synthetic estimate; no map or payment provider is called in the MVP.
-        return {"distance_km": 4.2, "estimated_minutes": 18, "estimated_fee": 8.5, "currency": "CNY", "source": "synthetic_estimator"}
+        try:
+            return self.map_provider.estimate_trip(origin, destination)
+        except MapProviderError as exc:
+            fallback = SyntheticMapProvider().estimate_trip(origin, destination)
+            fallback["source"] = "synthetic_fallback"
+            fallback["fallback_reason"] = str(exc)
+            return fallback
 
     def reserve_vehicle(self, vehicle_id: str, user_id: str, idempotency_key: str) -> dict:
         VehicleLookupInput(vehicle_id=vehicle_id)

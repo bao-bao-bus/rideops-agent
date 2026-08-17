@@ -15,6 +15,8 @@ class Settings(BaseModel):
     embedding_base_url: str = Field(default_factory=lambda: os.getenv("EMBEDDING_BASE_URL", ""))
     embedding_api_key: str = Field(default_factory=lambda: os.getenv("EMBEDDING_API_KEY", ""))
     embedding_model: str = Field(default_factory=lambda: os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"))
+    map_provider: str = Field(default_factory=lambda: os.getenv("RIDEOPS_MAP_PROVIDER", "mock"))
+    amap_api_key: str = Field(default_factory=lambda: os.getenv("AMAP_API_KEY", ""))
 
 
 settings = Settings()

@@ -54,7 +54,7 @@ python evals/run_rag_eval.py --output evals/mock-baseline.json
 
 这些数字仅用于后续比较真实 Embedding、BM25、Vector、Hybrid+RRF 和 Reranker 版本，不代表生产能力，也不作为简历指标。
 
-当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、合成路线/费用预估和幂等预约。事故流程现在支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。当前尚未实现：FastMCP、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
+当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、路线/费用预估和幂等预约。事故流程现在支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。出行前路线已经支持通过 MCP Client 调用高德官方远程 MCP；没有配置 Provider 或 API Key 时自动使用合成路线。费用仍由 RideOps 自己计算，不把地图路线费用冒充共享出行最终价格。当前尚未实现：自有 FastMCP 业务 Server、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
 
 ## 目录结构
 
@@ -85,6 +85,17 @@ uvicorn rideops.api.app:app --reload
 ```
 
 访问 `http://127.0.0.1:8000/health`。默认是 mock 模式，不需要 API Key。
+
+### 高德 MCP（可选）
+
+开发阶段默认不调用外部地图服务。需要真实路线时，在启动后端的同一环境中配置：
+
+```env
+RIDEOPS_MAP_PROVIDER=amap_mcp
+AMAP_API_KEY=你的高德Web服务Key
+```
+
+高德 MCP 返回真实路线距离和时间，RideOps 仍使用自己的计价规则计算费用，并在响应中区分 `source` 与 `pricing_source`。Key 只放在本地环境变量，不提交到仓库。调用失败时可以回退到合成路线，避免演示流程被外部服务中断。
 
 ## 运行测试
 
@@ -145,7 +156,7 @@ POST /api/pretrip/plan
 POST /api/pretrip/reserve
 ```
 
-当前 MVP 使用普通 HTTP 请求，不使用 SSE；使用 SQLite 保存业务状态和 Run 状态，不引入 Redis。
+当前 MVP 使用普通 HTTP 请求，不使用 SSE；使用 SQLite 保存业务状态和 Run 状态，不引入 Redis。高德路线调用通过 MCP Client 访问官方地图 MCP，订单、预约、事故工单等 RideOps 私有业务仍由本项目自己的 Service 和 Repository 负责。
 
 ## 下一阶段
 
@@ -153,4 +164,4 @@ POST /api/pretrip/reserve
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、费用预估和幂等预约接口；使用 pytest 覆盖 43 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、MCP 路线查询、费用预估和幂等预约接口；使用 pytest 覆盖 44 个测试场景。
