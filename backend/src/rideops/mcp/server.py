@@ -68,6 +68,23 @@ def build_server() -> FastMCP:
         ).model_dump(mode="json")
 
     @server.tool()
+    def create_long_rental_lead(listing_id: str, user_id: str, duration_days: int, idempotency_key: str, approval_reference: str, start_date: str | None = None) -> dict:
+        """创建长租跟进线索。必须提供人工确认引用和幂等键。"""
+        from rideops.domain.models import LongRentalLeadRequest
+
+        _require_approval(approval_reference)
+        return long_rental_service.create_lead(
+            LongRentalLeadRequest(
+                listing_id=listing_id,
+                user_id=user_id,
+                duration_days=duration_days,
+                start_date=start_date,
+                idempotency_key=idempotency_key,
+                approval_reference=approval_reference,
+            )
+        ).model_dump(mode="json")
+
+    @server.tool()
     def reserve_vehicle(vehicle_id: str, user_id: str, idempotency_key: str, approval_reference: str) -> dict:
         """预约车辆。必须提供人工确认引用和幂等键。"""
         _require_approval(approval_reference)

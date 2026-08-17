@@ -149,6 +149,27 @@ class LongRentalPlanResponse(DomainModel):
     missing_fields: list[str] = Field(default_factory=list)
 
 
+class LongRentalLeadRequest(DomainModel):
+    user_id: str = "usr_demo_001"
+    listing_id: str = Field(min_length=1)
+    duration_days: int = Field(ge=1, le=365)
+    start_date: str | None = None
+    idempotency_key: str = Field(min_length=1)
+    approval_reference: str = Field(min_length=1)
+
+
+class LongRentalLead(DomainModel):
+    lead_id: str
+    listing_id: str
+    user_id: str
+    city: str
+    duration_days: int
+    start_date: str | None = None
+    status: str
+    approval_reference: str
+    created_at: datetime
+
+
 class CustomerServiceQueryRequest(DomainModel):
     user_id: str = "usr_demo_001"
     message: str = Field(min_length=1)

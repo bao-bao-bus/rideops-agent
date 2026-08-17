@@ -103,6 +103,18 @@ class SQLiteBusinessRepository:
                     created_at TEXT NOT NULL,
                     idempotency_key TEXT NOT NULL UNIQUE
                 );
+                CREATE TABLE IF NOT EXISTS long_rental_leads (
+                    lead_id TEXT PRIMARY KEY,
+                    listing_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    city TEXT NOT NULL,
+                    duration_days INTEGER NOT NULL,
+                    start_date TEXT,
+                    status TEXT NOT NULL,
+                    approval_reference TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL UNIQUE
+                );
                 """
             )
             if connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0:
@@ -193,6 +205,23 @@ class SQLiteBusinessRepository:
                 for row in rows
             ]
 
+    def get_rental_listing(self, listing_id: str) -> RentalInventory | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM rental_inventory WHERE listing_id = ?", (listing_id,)).fetchone()
+            if row is None:
+                return None
+            return RentalInventory(
+                listing_id=row["listing_id"],
+                city=row["city"],
+                vehicle_type=row["vehicle_type"],
+                model=row["model"],
+                available_units=row["available_units"],
+                daily_rate=row["daily_rate"],
+                monthly_rate=row["monthly_rate"],
+                deposit=row["deposit"],
+                min_days=row["min_days"],
+            )
+
     def get_ticket(self, ticket_id: str) -> IncidentTicket | None:
         with self._connect() as connection:
             return self._ticket(connection.execute("SELECT * FROM incident_tickets WHERE ticket_id = ?", (ticket_id,)).fetchone())
@@ -220,6 +249,39 @@ class SQLiteBusinessRepository:
 
     def reserve_vehicle(self, vehicle_id: str, user_id: str, idempotency_key: str) -> dict:
         return self._idempotent_write(idempotency_key, "reserve_vehicle", lambda connection: self._reserve_vehicle(connection, vehicle_id, user_id, idempotency_key))
+
+    def create_long_rental_lead(self, listing_id: str, user_id: str, duration_days: int, start_date: str | None, approval_reference: str, idempotency_key: str) -> dict:
+        return self._idempotent_write(
+            idempotency_key,
+            "create_long_rental_lead",
+            lambda connection: self._create_long_rental_lead(connection, listing_id, user_id, duration_days, start_date, approval_reference, idempotency_key),
+        )
+
+    def _create_long_rental_lead(self, connection: sqlite3.Connection, listing_id: str, user_id: str, duration_days: int, start_date: str | None, approval_reference: str, idempotency_key: str) -> dict:
+        listing = connection.execute("SELECT city, available_units, min_days FROM rental_inventory WHERE listing_id = ?", (listing_id,)).fetchone()
+        if listing is None:
+            raise BusinessToolError("NOT_FOUND", f"长租方案不存在: {listing_id}")
+        if listing["available_units"] < 1:
+            raise BusinessToolError("CONFLICT", f"长租方案当前无库存: {listing_id}")
+        if duration_days < listing["min_days"]:
+            raise BusinessToolError("VALIDATION_ERROR", f"该方案最短租期为 {listing['min_days']} 天")
+        lead_id = f"lead_{uuid.uuid4().hex[:12]}"
+        created_at = datetime.now(timezone.utc).isoformat()
+        connection.execute(
+            "INSERT INTO long_rental_leads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (lead_id, listing_id, user_id, listing["city"], duration_days, start_date, "pending_follow_up", approval_reference, created_at, idempotency_key),
+        )
+        return {
+            "lead_id": lead_id,
+            "listing_id": listing_id,
+            "user_id": user_id,
+            "city": listing["city"],
+            "duration_days": duration_days,
+            "start_date": start_date,
+            "status": "pending_follow_up",
+            "approval_reference": approval_reference,
+            "created_at": created_at,
+        }
 
     def _reserve_vehicle(self, connection: sqlite3.Connection, vehicle_id: str, user_id: str, idempotency_key: str) -> dict:
         row = connection.execute("SELECT status FROM vehicles WHERE vehicle_id = ?", (vehicle_id,)).fetchone()

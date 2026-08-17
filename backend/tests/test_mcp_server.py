@@ -11,6 +11,7 @@ def test_rideops_mcp_server_exposes_customer_service_tools():
         "estimate_route_and_fare",
         "search_local_policy",
         "plan_long_rental",
+        "create_long_rental_lead",
         "reserve_vehicle",
         "suspend_order_billing",
         "mark_vehicle_unavailable",

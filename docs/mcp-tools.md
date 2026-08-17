@@ -29,6 +29,7 @@ rideops-mcp
 - `suspend_order_billing`
 - `mark_vehicle_unavailable`
 - `create_incident_ticket`
+- `create_long_rental_lead`
 
 每个写工具都要求：
 

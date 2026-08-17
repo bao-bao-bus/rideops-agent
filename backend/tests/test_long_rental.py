@@ -18,3 +18,46 @@ def test_long_rental_plan_reports_empty_city_inventory(client):
     assert body["answerable"] is False
     assert body["candidates"] == []
     assert "没有找到" in body["message"]
+
+
+def test_long_rental_lead_requires_confirmation_and_is_idempotent(client):
+    payload = {
+        "listing_id": "rent_sh_e1",
+        "duration_days": 45,
+        "start_date": "2026-09-01",
+        "idempotency_key": "lead-001",
+        "approval_reference": "user-confirmed-001",
+    }
+    first = client.post("/api/long-rental/leads", json=payload)
+    second = client.post("/api/long-rental/leads", json=payload)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() == second.json()
+    assert first.json()["status"] == "pending_follow_up"
+
+
+def test_long_rental_lead_rejects_unknown_listing(client):
+    response = client.post(
+        "/api/long-rental/leads",
+        json={
+            "listing_id": "missing-listing",
+            "duration_days": 45,
+            "idempotency_key": "lead-002",
+            "approval_reference": "user-confirmed-002",
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_long_rental_lead_rejects_blank_confirmation(client):
+    response = client.post(
+        "/api/long-rental/leads",
+        json={
+            "listing_id": "rent_sh_e1",
+            "duration_days": 45,
+            "idempotency_key": "lead-003",
+            "approval_reference": "   ",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "VALIDATION_ERROR"

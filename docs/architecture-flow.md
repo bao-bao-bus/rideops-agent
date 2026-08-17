@@ -24,6 +24,14 @@ flowchart TD
     P5 --> P6[预约写工具 + idempotency_key]
     P6 --> DB[(SQLite：车辆与预约状态)]
 
+    S -->|长租规划| L1[POST /api/long-rental/plan]
+    L1 --> L2[SQLite：长租库存与价格]
+    L2 --> L3[返回候选方案、预算判断和假设]
+    L3 --> L4{用户确认?}
+    L4 -->|是| L5[POST /api/long-rental/leads]
+    L5 --> L6[确认引用 + 幂等键]
+    L6 --> L7[(SQLite：长租跟进线索)]
+
     S -->|事故中| A1[POST /api/runs]
     A1 --> A2[Skill Router：accident-handling]
     A2 --> R1[政策文档解析与 Chunk]
@@ -53,7 +61,7 @@ flowchart TD
     REF --> F
 
     API[外部 Embedding API] -.后续启用.-> R3
-    MCP[自有 FastMCP 业务工具] -.后续封装普通工具.-> W1
+    MCP[RideOps 自有 FastMCP Server] --> W1
     SSE[SSE 事件流] -.后续替换普通 HTTP.-> F
     PG[PostgreSQL] -.后续可选.-> DB2
     REDIS[Redis] -.后续可靠性扩展.-> DB2
@@ -65,6 +73,6 @@ flowchart TD
 - 当前 RAG 使用 BM25 + Mock Vector + RRF，向量索引持久化在 SQLite。
 - 当前 Reranker 接口存在但默认关闭，没有用简单排序冒充真实 Reranker。
 - 当前路线查询已通过 MCP Client 调用高德官方 MCP；订单、预约、事故工单等 RideOps 私有业务仍是 Python 服务内普通工具。
-- 当前尚未把 RideOps 私有业务工具暴露为自有 FastMCP Server。
+- RideOps 私有业务工具已通过 stdio 暴露为 FastMCP Server。事故 HTTP 主流程目前仍直接调用 Service / Repository，以保持可恢复、可审计的闭环；后续若改为 MCP Client 调用，也会复用同一套 Service / Repository，而不是再造一套写入逻辑。
 - 当前前端使用普通 HTTP 请求，不是 SSE。
 - 当前业务数据和 Run 状态使用 SQLite，不需要 PostgreSQL、Redis 或 Docker。

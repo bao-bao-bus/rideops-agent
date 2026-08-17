@@ -54,7 +54,7 @@ python evals/run_rag_eval.py --output evals/mock-baseline.json
 
 这些数字仅用于后续比较真实 Embedding、BM25、Vector、Hybrid+RRF 和 Reranker 版本，不代表生产能力，也不作为简历指标。
 
-当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、路线/费用预估、长租库存/价格规划和幂等预约。事故流程现在支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。出行前路线已经支持通过 MCP Client 调用高德官方远程 MCP；没有配置 Provider 或 API Key 时自动使用合成路线。费用仍由 RideOps 自己计算，不把地图路线费用冒充共享出行最终价格。新增统一只读客服查询接口，能够根据用户问题查询路线、费用、附近车辆和本地政策，并返回来源、证据和缺失字段。长租规划目前只读查询库存和价格，不会绕过确认创建租赁订单。当前尚未实现：LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
+当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、路线/费用预估、长租库存/价格规划和幂等预约。事故流程现在支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。出行前路线已经支持通过 MCP Client 调用高德官方远程 MCP；没有配置 Provider 或 API Key 时自动使用合成路线。费用仍由 RideOps 自己计算，不把地图路线费用冒充共享出行最终价格。新增统一只读客服查询接口，能够根据用户问题查询路线、费用、附近车辆和本地政策，并返回来源、证据和缺失字段。长租规划支持查询库存和价格；用户确认后可带确认引用和幂等键创建后续跟进线索，但不会直接创建租赁订单。当前尚未实现：LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
 
 ## 目录结构
 
@@ -168,15 +168,16 @@ POST /api/pretrip/reserve
 
 ```text
 POST /api/long-rental/plan
+POST /api/long-rental/leads
 ```
 
-长租方案会返回城市、车型、可用库存、日租/月租计价方式、租金、押金、预算判断和计算假设；库存不足时明确返回不可回答，不虚构方案。
+长租方案会返回城市、车型、可用库存、日租/月租计价方式、租金、押金、预算判断和计算假设；库存不足时明确返回不可回答，不虚构方案。创建跟进线索必须带 `approval_reference` 和 `idempotency_key`，重复提交不会重复创建。
 
 当前 MVP 使用普通 HTTP 请求，不使用 SSE；使用 SQLite 保存业务状态和 Run 状态，不引入 Redis。高德路线调用通过 MCP Client 访问官方地图 MCP，订单、预约、事故工单等 RideOps 私有业务仍由本项目自己的 Service 和 Repository 负责。
 
 ## RideOps 自有 MCP
 
-自有 MCP Server 已提供 9 个共享出行客服工具，包含订单、车辆、路线/费用、政策检索和事故/预约写操作。启动方式：
+自有 MCP Server 已提供 11 个共享出行客服工具，包含订单、车辆、路线/费用、政策检索和事故、预约、长租留资写操作。启动方式：
 
 ```bash
 cd backend
@@ -192,4 +193,4 @@ rideops-mcp
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、MCP 路线查询、统一客服查询、长租库存/价格规划、费用预估和幂等预约接口；使用 pytest 覆盖 53 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、MCP 路线查询、统一客服查询、长租库存/价格规划与确认线索、费用预估和幂等预约接口；使用 pytest 覆盖 56 个测试场景。

@@ -1,4 +1,4 @@
-from rideops.domain.models import LongRentalCandidate, LongRentalPlanRequest, LongRentalPlanResponse
+from rideops.domain.models import LongRentalCandidate, LongRentalLead, LongRentalLeadRequest, LongRentalPlanRequest, LongRentalPlanResponse
 from rideops.repositories import SQLiteBusinessRepository
 
 
@@ -60,3 +60,15 @@ class LongRentalService:
             message=f"已找到 {len(candidates)} 个长租方案{budget_note}。结果仅用于方案比较，实际库存和价格需在确认时再次核验。",
             candidates=candidates,
         )
+
+    def create_lead(self, request: LongRentalLeadRequest) -> LongRentalLead:
+        if not request.approval_reference.strip():
+            raise ValueError("approval_reference is required to create a long-rental lead")
+        return LongRentalLead(**self.repository.create_long_rental_lead(
+            listing_id=request.listing_id,
+            user_id=request.user_id,
+            duration_days=request.duration_days,
+            start_date=request.start_date,
+            approval_reference=request.approval_reference,
+            idempotency_key=request.idempotency_key,
+        ))
