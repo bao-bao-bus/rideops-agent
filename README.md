@@ -166,6 +166,18 @@ POST /api/pretrip/reserve
 
 当前 MVP 使用普通 HTTP 请求，不使用 SSE；使用 SQLite 保存业务状态和 Run 状态，不引入 Redis。高德路线调用通过 MCP Client 访问官方地图 MCP，订单、预约、事故工单等 RideOps 私有业务仍由本项目自己的 Service 和 Repository 负责。
 
+## RideOps 自有 MCP
+
+自有 MCP Server 已提供 9 个共享出行客服工具，包含订单、车辆、路线/费用、政策检索和事故/预约写操作。启动方式：
+
+```bash
+cd backend
+pip install -e ".[test]"
+rideops-mcp
+```
+
+读工具可以直接查询；写工具必须携带 `idempotency_key` 和 `approval_reference`，不能绕过人工确认。详细工具边界见 [docs/mcp-tools.md](docs/mcp-tools.md)。
+
 ## 下一阶段
 
 下一轮使用 OpenAI-compatible API 实际运行真实 Embedding，并重新跑评估对比；确认 RAG 稳定后，再进入 FastMCP、PostgreSQL、SSE 断线恢复等加分项。
