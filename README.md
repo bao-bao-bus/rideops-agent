@@ -26,6 +26,7 @@
 - 中文分词与 BM25
 - SQLite 持久化向量索引
 - BM25 + Vector + RRF Hybrid Search
+- 可选 Reranker 接口（当前默认关闭）
 - `document_id`、标题、章节、内容、分数和来源引用
 - 无足够证据时拒答
 - `POST /api/rag/search` 检索接口
@@ -53,7 +54,7 @@ python evals/run_rag_eval.py --output evals/mock-baseline.json
 
 这些数字仅用于后续比较真实 Embedding、BM25、Vector、Hybrid+RRF 和 Reranker 版本，不代表生产能力，也不作为简历指标。
 
-当前已增加事故处理 MVP：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读和前端真实 Run 状态展示。当前尚未实现：FastMCP、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
+当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、合成路线/费用预估和幂等预约。当前尚未实现：FastMCP、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
 
 ## 目录结构
 
@@ -133,6 +134,13 @@ GET  /api/runs/{run_id}
 POST /api/runs/{run_id}/resume
 ```
 
+当前出行前接口：
+
+```text
+POST /api/pretrip/plan
+POST /api/pretrip/reserve
+```
+
 当前 MVP 使用普通 HTTP 请求，不使用 SSE；使用 SQLite 保存业务状态和 Run 状态，不引入 Redis。
 
 ## 下一阶段
@@ -141,4 +149,4 @@ POST /api/runs/{run_id}/resume
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选真实 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现审批前禁止写入、批准后幂等执行及订单/车辆/工单状态回读；使用 pytest 覆盖 38 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现审批前禁止写入、批准后幂等执行及订单/车辆/工单状态回读，同时补充出行前车辆查询、费用预估和幂等预约接口；使用 pytest 覆盖 41 个测试场景。

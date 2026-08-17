@@ -5,6 +5,7 @@ from .chunker import DocumentChunk, split_markdown
 from .embeddings import EmbeddingProvider, MockEmbeddingProvider
 from .models import Evidence
 from .parser import PolicyDocument
+from .reranker import NoopReranker, Reranker
 from .vector_store import SQLiteVectorStore, chunk_id_for
 
 
@@ -17,10 +18,11 @@ class RRFConfig:
 
 
 class HybridRetriever:
-    def __init__(self, index_path, embedding_provider: EmbeddingProvider | None = None, rrf: RRFConfig | None = None) -> None:
+    def __init__(self, index_path, embedding_provider: EmbeddingProvider | None = None, rrf: RRFConfig | None = None, reranker: Reranker | None = None) -> None:
         self.embedding_provider = embedding_provider or MockEmbeddingProvider()
         self.vector_store = SQLiteVectorStore(index_path)
         self.rrf = rrf or RRFConfig()
+        self.reranker = reranker or NoopReranker()
         self.bm25 = BM25Index()
 
     def add_documents(self, documents: list[PolicyDocument]) -> None:
@@ -54,7 +56,7 @@ class HybridRetriever:
             evidence.append(Evidence(document_id=stored.chunk.document_id, title=stored.chunk.title, section=stored.chunk.section, content=stored.chunk.content, score=round(normalized_score, 4), source=stored.chunk.source))
             if len(evidence) >= top_k:
                 break
-        return evidence
+        return self.reranker.rerank(query, evidence)
 
 
 # Kept as a small compatibility alias for callers of the first prototype.

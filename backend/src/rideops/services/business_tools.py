@@ -43,6 +43,22 @@ class BusinessTools:
             raise ValueError("ticket_id cannot be empty")
         return self.repository.get_ticket(ticket_id)
 
+    def get_nearby_vehicles(self, location: str, vehicle_type: str | None = None) -> list[Vehicle]:
+        if not location:
+            raise ValueError("location cannot be empty")
+        return self.repository.get_available_vehicles(location, vehicle_type)
+
+    def estimate_trip(self, origin: str, destination: str) -> dict:
+        if not origin or not destination:
+            raise ValueError("origin and destination are required")
+        # Synthetic estimate; no map or payment provider is called in the MVP.
+        return {"distance_km": 4.2, "estimated_minutes": 18, "estimated_fee": 8.5, "currency": "CNY", "source": "synthetic_estimator"}
+
+    def reserve_vehicle(self, vehicle_id: str, user_id: str, idempotency_key: str) -> dict:
+        VehicleLookupInput(vehicle_id=vehicle_id)
+        WriteInput(idempotency_key=idempotency_key)
+        return self.repository.reserve_vehicle(vehicle_id, user_id, idempotency_key)
+
     def suspend_order_billing(self, order_id: str, idempotency_key: str) -> dict:
         OrderLookupInput(order_id=order_id)
         WriteInput(idempotency_key=idempotency_key)

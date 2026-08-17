@@ -77,13 +77,24 @@ class SQLiteBusinessRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS reservations (
+                    reservation_id TEXT PRIMARY KEY,
+                    vehicle_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL UNIQUE
+                );
                 """
             )
             if connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0] == 0:
                 now = datetime.now(timezone.utc).isoformat()
                 connection.execute("INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?, ?)", ("ord_demo_001", "usr_demo_001", "veh_demo_001", "active", "active", now, "上海市静安区"))
                 connection.execute("INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?)", ("veh_demo_001", "沪A·MOCK01", "RideOps E-bike", "in_use", 72, "上海市静安区"))
+                connection.execute("INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?)", ("veh_demo_002", "沪A·MOCK02", "RideOps E-bike", "available", 88, "上海市静安区"))
                 connection.execute("INSERT INTO inventory VALUES (?, ?, ?, ?)", ("inv_lock_001", "智能锁组件", 18, "上海一号仓"))
+            if connection.execute("SELECT 1 FROM vehicles WHERE vehicle_id = 'veh_demo_002'").fetchone() is None:
+                connection.execute("INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?)", ("veh_demo_002", "沪A·MOCK02", "RideOps E-bike", "available", 88, "上海市静安区"))
 
     @staticmethod
     def _order(row: sqlite3.Row | None) -> Order | None:
@@ -115,6 +126,14 @@ class SQLiteBusinessRepository:
         with self._connect() as connection:
             return self._vehicle(connection.execute("SELECT * FROM vehicles WHERE vehicle_id = ?", (vehicle_id,)).fetchone())
 
+    def get_available_vehicles(self, location: str, vehicle_type: str | None = None) -> list[Vehicle]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM vehicles WHERE status = 'available' AND current_location = ?", (location,)).fetchall()
+            vehicles = [self._vehicle(row) for row in rows]
+            if vehicle_type:
+                vehicles = [vehicle for vehicle in vehicles if vehicle and vehicle_type.lower() in vehicle.model.lower()]
+            return [vehicle for vehicle in vehicles if vehicle]
+
     def list_inventory(self) -> list[InventoryItem]:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM inventory ORDER BY item_id").fetchall()
@@ -144,6 +163,20 @@ class SQLiteBusinessRepository:
 
     def create_incident_ticket(self, order_id: str, user_id: str, description: str, idempotency_key: str) -> dict:
         return self._idempotent_write(idempotency_key, "create_incident_ticket", lambda connection: self._create_incident_ticket(connection, order_id, user_id, description, idempotency_key))
+
+    def reserve_vehicle(self, vehicle_id: str, user_id: str, idempotency_key: str) -> dict:
+        return self._idempotent_write(idempotency_key, "reserve_vehicle", lambda connection: self._reserve_vehicle(connection, vehicle_id, user_id, idempotency_key))
+
+    def _reserve_vehicle(self, connection: sqlite3.Connection, vehicle_id: str, user_id: str, idempotency_key: str) -> dict:
+        row = connection.execute("SELECT status FROM vehicles WHERE vehicle_id = ?", (vehicle_id,)).fetchone()
+        if row is None:
+            raise BusinessToolError("NOT_FOUND", f"车辆不存在: {vehicle_id}")
+        if row["status"] != "available":
+            raise BusinessToolError("CONFLICT", f"车辆当前不可预约: {vehicle_id}")
+        reservation_id = f"res_{uuid.uuid4().hex[:12]}"
+        connection.execute("UPDATE vehicles SET status = 'in_use' WHERE vehicle_id = ?", (vehicle_id,))
+        connection.execute("INSERT INTO reservations VALUES (?, ?, ?, ?, ?, ?)", (reservation_id, vehicle_id, user_id, "reserved", datetime.now(timezone.utc).isoformat(), idempotency_key))
+        return {"reservation_id": reservation_id, "vehicle_id": vehicle_id, "status": "reserved"}
 
     def _create_incident_ticket(self, connection: sqlite3.Connection, order_id: str, user_id: str, description: str, idempotency_key: str) -> dict:
         if connection.execute("SELECT 1 FROM orders WHERE order_id = ?", (order_id,)).fetchone() is None:

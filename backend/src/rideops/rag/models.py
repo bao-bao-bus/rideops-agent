@@ -23,3 +23,4 @@ class RAGResponse(BaseModel):
     answerable: bool
     evidence: list[Evidence]
     refusal_reason: str | None = None
+    retrieval_strategy: str = "bm25+vector+rrf"

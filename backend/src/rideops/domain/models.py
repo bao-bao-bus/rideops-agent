@@ -76,6 +76,27 @@ class ResumeRequest(DomainModel):
     approved: bool
 
 
+class PreTripRequest(DomainModel):
+    user_id: str = "usr_demo_001"
+    origin: str = Field(min_length=1)
+    destination: str = Field(min_length=1)
+    vehicle_type: str | None = None
+
+
+class PreTripReservationRequest(DomainModel):
+    user_id: str = "usr_demo_001"
+    vehicle_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1)
+
+
+class PreTripPlanResponse(DomainModel):
+    origin: str
+    destination: str
+    nearby_vehicles: list[dict] = Field(default_factory=list)
+    estimate: dict
+    reservation: dict | None = None
+
+
 class RunResponse(DomainModel):
     run_id: str
     workflow_status: str

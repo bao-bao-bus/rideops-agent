@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from rideops.agents import IncidentWorkflow
 from rideops.api.runs import create_runs_router
+from rideops.api.pretrip import create_pretrip_router
 from rideops.config import settings
 from rideops.rag import RAGQuery, RAGResponse, build_default_service
 from rideops.rag.embeddings import build_embedding_provider
@@ -22,6 +23,7 @@ def create_app(database_path=None) -> FastAPI:
     application = FastAPI(title=settings.app_name, version="0.2.0")
     application.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], allow_methods=["*"], allow_headers=["*"])
     application.include_router(create_runs_router(incident_workflow, business_data))
+    application.include_router(create_pretrip_router(BusinessTools(business_data)))
 
     @application.get("/health")
     def health() -> dict[str, str]:
