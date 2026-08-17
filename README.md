@@ -88,14 +88,14 @@ uvicorn rideops.api.app:app --reload
 
 ### 高德 MCP（可选）
 
-开发阶段默认不调用外部地图服务。需要真实路线时，在启动后端的同一环境中配置：
+开发阶段默认不调用外部地图服务。需要真实路线时，在项目根目录 `.env` 或 `backend/.env` 中配置：
 
 ```env
 RIDEOPS_MAP_PROVIDER=amap_mcp
 AMAP_API_KEY=你的高德Web服务Key
 ```
 
-高德 MCP 返回真实路线距离和时间，RideOps 仍使用自己的计价规则计算费用，并在响应中区分 `source` 与 `pricing_source`。Key 只放在本地环境变量，不提交到仓库。调用失败时可以回退到合成路线，避免演示流程被外部服务中断。
+高德 MCP 返回真实路线距离和时间，RideOps 仍使用自己的计价规则计算费用，并在响应中区分 `source` 与 `pricing_source`。Key 只放在本地 `.env`，不提交到仓库。调用失败时可以回退到合成路线，避免演示流程被外部服务中断。
 
 ## 运行测试
 

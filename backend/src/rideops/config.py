@@ -1,7 +1,13 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(PROJECT_ROOT / "backend" / ".env")
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 class Settings(BaseModel):
