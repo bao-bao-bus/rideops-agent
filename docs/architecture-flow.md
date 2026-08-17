@@ -6,14 +6,18 @@
 flowchart TD
     U[用户请求] --> S{业务场景}
 
-    S -->|客服查询| C1[POST /api/customer-service/query]
-    C1 --> C2{路线 / 费用 / 车辆 / 政策}
-    C2 --> C3[高德官方 MCP：地理编码与骑行路线]
-    C2 --> C4[RideOps 计价与 SQLite 车辆查询]
-    C2 --> C5[RAG：本地政策证据]
-    C3 --> C6[返回真实路线或合成回退]
-    C4 --> C6
-    C5 --> C6
+    S -->|客服查询| C0[Customer Service Supervisor]
+    C0 --> C1[出行前 Agent：路线/费用/车辆]
+    C0 --> C2[政策 Agent：RAG 证据]
+    C0 --> C3[长租 Agent：库存/价格规划]
+    C0 --> C4[事故分诊 Agent：交接事故 Run]
+    C1 --> C5[高德官方 MCP + RideOps 计价 + SQLite 车辆]
+    C2 --> C6[RAG：本地政策证据]
+    C3 --> C7[SQLite：长租库存与价格]
+    C4 -.不写入.-> A1
+    C5 --> C8[汇总回复、来源与缺失字段]
+    C6 --> C8
+    C7 --> C8
 
     S -->|出行前预约| P1[POST /api/pretrip/plan]
     P1 --> P2[普通只读工具：查询附近可用车辆]
@@ -76,6 +80,7 @@ flowchart TD
 - 当前默认使用 Mock Embedding，不调用外部模型 API。
 - 当前 RAG 使用 BM25 + Mock Vector + RRF，向量索引持久化在 SQLite。
 - 当前 Reranker 接口存在但默认关闭，没有用简单排序冒充真实 Reranker。
+- 当前已实现确定性的 Customer Service Supervisor：可将一个客服问题分派给出行前、政策、长租或事故分诊 Agent，并在响应中返回 `delegated_agents`。它不依赖模型 API，也不让 Agent 直接写数据库。
 - 当前路线查询已通过 MCP Client 调用高德官方 MCP；订单、预约、事故工单等 RideOps 私有业务仍是 Python 服务内普通工具。预约取消会校验预约归属，并只在车辆仍是预约占用状态时恢复可用。
 - RideOps 私有业务工具已通过 stdio 暴露为 FastMCP Server。事故 HTTP 主流程目前仍直接调用 Service / Repository，以保持可恢复、可审计的闭环；后续若改为 MCP Client 调用，也会复用同一套 Service / Repository，而不是再造一套写入逻辑。
 - 当前前端使用普通 HTTP 请求，不是 SSE。

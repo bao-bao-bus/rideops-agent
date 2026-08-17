@@ -185,6 +185,11 @@ class CustomerServiceQueryRequest(DomainModel):
     location: str | None = None
     city: str | None = None
     vehicle_type: str | None = None
+    duration_days: int | None = Field(default=None, ge=1, le=365)
+    daily_budget: float | None = Field(default=None, ge=0)
+    order_id: str | None = None
+    vehicle_id: str | None = None
+    description: str | None = None
 
 
 class CustomerServiceResponse(DomainModel):
@@ -197,6 +202,9 @@ class CustomerServiceResponse(DomainModel):
     evidence: list[dict] = Field(default_factory=list)
     nearby_vehicles: list[dict] = Field(default_factory=list)
     estimate: dict | None = None
+    long_rental_plan: dict | None = None
+    next_action: dict | None = None
+    delegated_agents: list[str] = Field(default_factory=list)
 
 
 class RunResponse(DomainModel):
