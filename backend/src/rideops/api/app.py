@@ -19,7 +19,7 @@ rag_service = build_default_service(settings.policies_dir, settings.rag_index_pa
 
 def create_app(database_path=None) -> FastAPI:
     business_data = SQLiteBusinessRepository(database_path or settings.database_path)
-    incident_workflow = IncidentWorkflow(rag_service, business_data, router, BusinessTools(business_data))
+    incident_workflow = IncidentWorkflow(rag_service, business_data, router, BusinessTools(business_data), event_sink=business_data.append_event)
     application = FastAPI(title=settings.app_name, version="0.2.0")
     application.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], allow_methods=["*"], allow_headers=["*"])
     application.include_router(create_runs_router(incident_workflow, business_data))

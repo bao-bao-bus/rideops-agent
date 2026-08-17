@@ -18,6 +18,8 @@ type Evidence = {
 type PlannedAction = {
   action_id: string;
   tool: string;
+  reason: string;
+  risk: string;
   requires_approval: boolean;
   arguments: Record<string, string>;
 };
@@ -37,6 +39,7 @@ type RunData = {
     vehicle?: { vehicle_id: string; status: string } | null;
     ticket?: { ticket_id: string; status: string } | null;
   };
+  events: Array<{ event_id: number; event_type: string; payload: Record<string, unknown>; created_at: string }>;
   message: string;
 };
 
@@ -72,7 +75,7 @@ function stepState(run: RunData | null, index: number) {
 
 export default function Home() {
   const [run, setRun] = useState<RunData | null>(null);
-  const [tab, setTab] = useState<"plan" | "evidence">("plan");
+  const [tab, setTab] = useState<"plan" | "evidence" | "audit">("plan");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -164,8 +167,8 @@ export default function Home() {
 
       <section className="decision panel">
         <div className="decisionHead"><div><p className="eyebrow">HUMAN-IN-THE-LOOP</p><h2>{actionTitle}</h2></div><span className={`pill ${status}`}>{status === "loading" ? "CONNECTING" : run?.workflow_status.toUpperCase()}</span></div>
-        <div className="tabs"><button className={tab === "plan" ? "selected" : ""} onClick={() => setTab("plan")}>执行计划</button><button className={tab === "evidence" ? "selected" : ""} onClick={() => setTab("evidence")}>证据与回读</button></div>
-        {tab === "plan" ? <div className="toolGrid">{run?.planned_actions.length ? run.planned_actions.map((action) => <article key={action.action_id}><code>{action.tool}</code><b>{toolLabels[action.tool] ?? action.tool}</b><p>{Object.values(action.arguments).filter(Boolean).join(" · ")}</p><span>{action.requires_approval ? "WRITE · APPROVAL REQUIRED" : "READ ONLY"}</span></article>) : <article><b>{run?.message ?? "正在读取后端计划"}</b><p>{run?.missing_fields.join("、") || "暂无可执行动作"}</p></article>}</div> : <div className="evidence">{run?.evidence.map((item) => <article key={`${item.document_id}-${item.section}`}><b>{item.title} · {item.section}</b><p>{item.content}</p><small>score {item.score} · {item.source}</small></article>)}{run?.final_state.order && <article><b>SQLite 业务状态回读</b><p>订单计费：{run.final_state.order.billing_status}；车辆状态：{run.final_state.vehicle?.status ?? "未回读"}；工单：{run.final_state.ticket?.status ?? "尚未创建"}</p></article>}</div>}
+        <div className="tabs"><button className={tab === "plan" ? "selected" : ""} onClick={() => setTab("plan")}>执行计划</button><button className={tab === "evidence" ? "selected" : ""} onClick={() => setTab("evidence")}>证据与回读</button><button className={tab === "audit" ? "selected" : ""} onClick={() => setTab("audit")}>审计日志</button></div>
+        {tab === "plan" ? <div className="toolGrid">{run?.planned_actions.length ? run.planned_actions.map((action) => <article key={action.action_id}><code>{action.tool}</code><b>{toolLabels[action.tool] ?? action.tool}</b><p>{action.reason}</p><small>风险：{action.risk}</small><span>{action.requires_approval ? "WRITE · APPROVAL REQUIRED" : "READ ONLY"}</span></article>) : <article><b>{run?.message ?? "正在读取后端计划"}</b><p>{run?.missing_fields.join("、") || "暂无可执行动作"}</p></article>}</div> : tab === "evidence" ? <div className="evidence">{run?.evidence.map((item) => <article key={`${item.document_id}-${item.section}`}><b>{item.title} · {item.section}</b><p>{item.content}</p><small>score {item.score} · {item.source}</small></article>)}{run?.final_state.order && <article><b>SQLite 业务状态回读</b><p>订单计费：{run.final_state.order.billing_status}；车辆状态：{run.final_state.vehicle?.status ?? "未回读"}；工单：{run.final_state.ticket?.status ?? "尚未创建"}</p></article>}</div> : <div className="evidence">{run?.events.map((event) => <article key={event.event_id}><code>{event.event_type}</code><b>{new Date(event.created_at).toLocaleTimeString("zh-CN")}</b><p>{JSON.stringify(event.payload)}</p></article>)}</div>}
         {run?.workflow_status === "awaiting_approval" && <div className="actions"><button className="secondary" disabled={submitting} onClick={() => resume(false)}>拒绝执行</button><button className="primary" disabled={submitting} onClick={() => resume(true)}>{submitting ? "处理中..." : "批准并执行"}</button></div>}
         {run?.workflow_status === "completed" && <div className="result">✓ SQLite 持久化写入成功 · 事故工单 {ticketId ?? "已创建"} · 订单、车辆和工单状态已回读</div>}
         {run?.workflow_status === "safe_terminated" && <div className="result rejectedResult">流程已安全终止，未调用任何写工具。</div>}

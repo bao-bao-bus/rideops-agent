@@ -54,7 +54,7 @@ python evals/run_rag_eval.py --output evals/mock-baseline.json
 
 这些数字仅用于后续比较真实 Embedding、BM25、Vector、Hybrid+RRF 和 Reranker 版本，不代表生产能力，也不作为简历指标。
 
-当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、合成路线/费用预估和幂等预约。当前尚未实现：FastMCP、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
+当前已增加事故处理 MVP 和出行前场景边界：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读、附近车辆查询、合成路线/费用预估和幂等预约。事故流程现在支持缺失信息补交后继续运行，并持久化记录路由、检索、追问、审批、工具执行和最终完成等运行事件，方便前端展示审计轨迹。当前尚未实现：FastMCP、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 默认仍使用 Mock Embedding，但已经具备真实 Embedding Adapter 接口。
 
 ## 目录结构
 
@@ -131,8 +131,12 @@ curl -X POST http://127.0.0.1:8000/api/rag/search \
 ```text
 POST /api/runs
 GET  /api/runs/{run_id}
+GET  /api/runs/{run_id}/events
+POST /api/runs/{run_id}/provide-info
 POST /api/runs/{run_id}/resume
 ```
+
+当事故信息不完整时，`provide-info` 会将用户补充的信息写回当前 Run，并重新进入准备阶段；只有进入人工审批后，`resume` 才会执行写操作。Run 事件保存在 SQLite 的 `run_events` 表中，当前以 JSON 接口提供，后续可在不改变业务事件模型的情况下接入 SSE。
 
 当前出行前接口：
 
@@ -149,4 +153,4 @@ POST /api/pretrip/reserve
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现审批前禁止写入、批准后幂等执行及订单/车辆/工单状态回读，同时补充出行前车辆查询、费用预估和幂等预约接口；使用 pytest 覆盖 41 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读，同时补充出行前车辆查询、费用预估和幂等预约接口；使用 pytest 覆盖 43 个测试场景。

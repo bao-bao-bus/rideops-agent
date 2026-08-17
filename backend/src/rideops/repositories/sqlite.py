@@ -77,6 +77,13 @@ class SQLiteBusinessRepository:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS run_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS reservations (
                     reservation_id TEXT PRIMARY KEY,
                     vehicle_id TEXT NOT NULL,
@@ -207,6 +214,18 @@ class SQLiteBusinessRepository:
         with self._connect() as connection:
             row = connection.execute("SELECT state_json FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
             return json.loads(row["state_json"]) if row else None
+
+    def append_event(self, run_id: str, event_type: str, payload: dict | None = None) -> dict:
+        event = {"event_id": None, "run_id": run_id, "event_type": event_type, "payload": payload or {}, "created_at": datetime.now(timezone.utc).isoformat()}
+        with self._connect() as connection:
+            cursor = connection.execute("INSERT INTO run_events(run_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)", (run_id, event_type, json.dumps(event["payload"], ensure_ascii=False), event["created_at"]))
+            event["event_id"] = cursor.lastrowid
+        return event
+
+    def list_events(self, run_id: str) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT event_id, run_id, event_type, payload_json, created_at FROM run_events WHERE run_id = ? ORDER BY event_id", (run_id,)).fetchall()
+        return [{"event_id": row["event_id"], "run_id": row["run_id"], "event_type": row["event_type"], "payload": json.loads(row["payload_json"]), "created_at": row["created_at"]} for row in rows]
 
     def snapshot(self) -> dict:
         with self._connect() as connection:

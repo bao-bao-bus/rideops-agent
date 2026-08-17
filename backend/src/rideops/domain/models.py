@@ -76,6 +76,13 @@ class ResumeRequest(DomainModel):
     approved: bool
 
 
+class ProvideInfoRequest(DomainModel):
+    order_id: str | None = None
+    vehicle_id: str | None = None
+    location: str | None = None
+    description: str | None = None
+
+
 class PreTripRequest(DomainModel):
     user_id: str = "usr_demo_001"
     origin: str = Field(min_length=1)
@@ -108,4 +115,5 @@ class RunResponse(DomainModel):
     approval: str = "not_required"
     action_results: list[dict] = Field(default_factory=list)
     final_state: dict = Field(default_factory=dict)
+    events: list[dict] = Field(default_factory=list)
     message: str

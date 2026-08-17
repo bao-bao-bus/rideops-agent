@@ -1,10 +1,9 @@
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
 from rideops.agents import IncidentWorkflow
-from rideops.domain.models import IncidentRunRequest, ResumeRequest, RunResponse
+from rideops.domain.models import IncidentRunRequest, ProvideInfoRequest, ResumeRequest, RunResponse
 
 
 def _message(state: dict) -> str:
@@ -23,7 +22,7 @@ def _message(state: dict) -> str:
     return "事故流程已创建。"
 
 
-def state_to_response(state: dict) -> RunResponse:
+def state_to_response(state: dict, events: list[dict] | None = None) -> RunResponse:
     return RunResponse(
         run_id=state["run_id"],
         workflow_status=state.get("workflow_status", "created"),
@@ -35,6 +34,7 @@ def state_to_response(state: dict) -> RunResponse:
         approval=state.get("approval", "not_required"),
         action_results=state.get("action_results", []),
         final_state=state.get("final_state", {}),
+        events=events or [],
         message=_message(state),
     )
 
@@ -56,16 +56,41 @@ def create_runs_router(workflow: IncidentWorkflow, repository) -> APIRouter:
             "error_history": [],
             "workflow_status": "created",
         }
+        repository.append_event(run_id, "run.created", {"user_id": request.user_id})
         state = workflow.prepare(state)
         repository.save_run(run_id, state)
-        return state_to_response(state)
+        return state_to_response(state, repository.list_events(run_id))
 
     @api.get("/{run_id}", response_model=RunResponse)
     def get_run(run_id: str):
         state = repository.get_run(run_id)
         if state is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        return state_to_response(state)
+        return state_to_response(state, repository.list_events(run_id))
+
+    @api.get("/{run_id}/events")
+    def list_run_events(run_id: str):
+        if repository.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return {"run_id": run_id, "events": repository.list_events(run_id)}
+
+    @api.post("/{run_id}/provide-info", response_model=RunResponse)
+    def provide_info(run_id: str, request: ProvideInfoRequest):
+        state = repository.get_run(run_id)
+        if state is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if state.get("workflow_status") != "waiting_for_input":
+            return state_to_response(state, repository.list_events(run_id))
+        fields = dict(state.get("collected_fields", {}))
+        fields.update({key: value for key, value in request.model_dump().items() if value is not None})
+        state["collected_fields"] = fields
+        state["missing_fields"] = []
+        state["error_history"] = []
+        state["workflow_status"] = "created"
+        repository.append_event(run_id, "input.received", {"fields": list(request.model_dump(exclude_none=True))})
+        state = workflow.prepare(state)
+        repository.save_run(run_id, state)
+        return state_to_response(state, repository.list_events(run_id))
 
     @api.post("/{run_id}/resume", response_model=RunResponse)
     def resume_run(run_id: str, request: ResumeRequest):
@@ -73,13 +98,16 @@ def create_runs_router(workflow: IncidentWorkflow, repository) -> APIRouter:
         if state is None:
             raise HTTPException(status_code=404, detail="Run not found")
         if state.get("workflow_status") != "awaiting_approval":
-            return state_to_response(state)
+            return state_to_response(state, repository.list_events(run_id))
         state["approval"] = "approved" if request.approved else "rejected"
         if request.approved:
+            repository.append_event(run_id, "run.resumed", {"approval": "approved"})
             state = workflow.execute(state)
         else:
+            repository.append_event(run_id, "approval.rejected", {})
             state["workflow_status"] = "safe_terminated"
+            repository.append_event(run_id, "run.safe_terminated", {})
         repository.save_run(run_id, state)
-        return state_to_response(state)
+        return state_to_response(state, repository.list_events(run_id))
 
     return api

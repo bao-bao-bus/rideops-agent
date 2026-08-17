@@ -17,6 +17,8 @@ def test_incident_run_waits_for_approval_without_writing(client):
     assert body["approval"] == "pending"
     assert len(body["evidence"]) > 0
     assert len(body["planned_actions"]) == 3
+    assert body["planned_actions"][0]["reason"]
+    assert body["planned_actions"][0]["risk"]
     assert body["action_results"] == []
     assert body["final_state"]["order"]["billing_status"] == "active"
 
@@ -28,6 +30,32 @@ def test_missing_fields_are_returned_as_follow_up_request(client):
     assert body["workflow_status"] == "waiting_for_input"
     assert set(body["missing_fields"]) == {"order_id", "location", "description"}
     assert body["planned_actions"] == []
+
+
+def test_providing_missing_information_continues_to_approval(client):
+    created = client.post("/api/runs", json={"message": "车辆发生事故了"}).json()
+    continued = client.post(f"/api/runs/{created['run_id']}/provide-info", json={"order_id": "ord_demo_001", "location": "上海市静安区", "description": "车辆碰撞并且车锁损坏"})
+    assert continued.status_code == 200
+    body = continued.json()
+    assert body["workflow_status"] == "awaiting_approval"
+    assert body["missing_fields"] == []
+
+
+def test_run_events_record_decisions_and_tool_trace(client):
+    created = client.post("/api/runs", json=run_request()).json()
+    run_id = created["run_id"]
+    pending_events = [event["event_type"] for event in created["events"]]
+    assert pending_events[:4] == ["run.created", "skill.selected", "evidence.retrieved", "business.state.queried"]
+    assert "approval.required" in pending_events
+    completed = client.post(f"/api/runs/{run_id}/resume", json={"approved": True}).json()
+    event_types = [event["event_type"] for event in completed["events"]]
+    assert "run.resumed" in event_types
+    assert event_types.count("tool.started") == 3
+    assert event_types.count("tool.completed") == 3
+    assert event_types[-1] == "run.completed"
+    fetched = client.get(f"/api/runs/{run_id}/events")
+    assert fetched.status_code == 200
+    assert len(fetched.json()["events"]) == len(completed["events"])
 
 
 def test_approval_executes_writes_and_reads_back_sqlite_state(client):
