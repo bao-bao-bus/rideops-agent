@@ -86,3 +86,33 @@ def test_supervisor_hands_incident_to_existing_approval_workflow_without_writing
     assert body["next_action"]["endpoint"] == "/api/runs"
     snapshot = client.get("/api/demo-data").json()
     assert snapshot["orders"][0]["billing_status"] == "active"
+
+
+def test_customer_session_continues_long_rental_follow_up_with_extracted_context(client):
+    session = client.post("/api/customer-service/sessions", json={"user_id": "usr_demo_001"})
+    assert session.status_code == 200
+    session_id = session.json()["session_id"]
+    first = client.post(
+        "/api/customer-service/query",
+        json={"session_id": session_id, "message": "我想在上海长租电单车"},
+    )
+    assert first.status_code == 200
+    assert first.json()["missing_fields"] == ["duration_days"]
+    second = client.post(
+        "/api/customer-service/query",
+        json={"session_id": session_id, "message": "45天，日预算40元"},
+    )
+    assert second.status_code == 200
+    body = second.json()
+    assert body["session_id"] == session_id
+    assert body["scenario"] == "long_rental"
+    assert body["long_rental_plan"]["candidates"]
+
+
+def test_customer_session_checks_user_ownership(client):
+    session = client.post("/api/customer-service/sessions", json={"user_id": "usr_demo_001"}).json()
+    response = client.post(
+        "/api/customer-service/query",
+        json={"session_id": session["session_id"], "user_id": "usr_other", "message": "附近有车吗？"},
+    )
+    assert response.status_code == 403

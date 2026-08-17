@@ -174,14 +174,18 @@ class CustomerServiceSupervisor:
         self.long_rental_agent = LongRentalAgent(long_rental_service)
         self.incident_agent = IncidentTriageAgent()
 
-    def query(self, request: CustomerServiceQueryRequest) -> CustomerServiceResponse:
+    def query(self, request: CustomerServiceQueryRequest, active_scenario: str | None = None) -> CustomerServiceResponse:
         route = self.router.route(request.message)
-        if self.incident_agent.handles(request.message):
+        has_new_intent = any(
+            agent.handles(request.message)
+            for agent in (self.pretrip_agent, self.policy_agent, self.long_rental_agent, self.incident_agent)
+        )
+        if self.incident_agent.handles(request.message) or (not has_new_intent and active_scenario == "incident"):
             results = [self.incident_agent.run(request)]
         else:
             results = []
             for agent in (self.pretrip_agent, self.policy_agent, self.long_rental_agent):
-                if agent.handles(request.message):
+                if agent.handles(request.message) or (not has_new_intent and active_scenario == "pretrip" and agent is self.pretrip_agent) or (not has_new_intent and active_scenario == "long_rental" and agent is self.long_rental_agent):
                     results.append(agent.run(request))
         if not results:
             return CustomerServiceResponse(

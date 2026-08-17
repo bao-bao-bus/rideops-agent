@@ -179,6 +179,7 @@ class LongRentalLead(DomainModel):
 
 class CustomerServiceQueryRequest(DomainModel):
     user_id: str = "usr_demo_001"
+    session_id: str | None = None
     message: str = Field(min_length=1)
     origin: str | None = None
     destination: str | None = None
@@ -193,6 +194,7 @@ class CustomerServiceQueryRequest(DomainModel):
 
 
 class CustomerServiceResponse(DomainModel):
+    session_id: str | None = None
     scenario: str
     selected_skill: str | None = None
     matched_terms: list[str] = Field(default_factory=list)
@@ -205,6 +207,17 @@ class CustomerServiceResponse(DomainModel):
     long_rental_plan: dict | None = None
     next_action: dict | None = None
     delegated_agents: list[str] = Field(default_factory=list)
+
+
+class CustomerSessionCreateRequest(DomainModel):
+    user_id: str = "usr_demo_001"
+
+
+class CustomerSessionResponse(DomainModel):
+    session_id: str
+    user_id: str
+    active_scenario: str | None = None
+    created_at: datetime
 
 
 class RunResponse(DomainModel):

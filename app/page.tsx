@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_RIDEOPS_API_URL ?? "http://127.0.0.1:8000";
 
@@ -144,19 +144,35 @@ export default function Home() {
     },
   ]);
   const [apiState, setApiState] = useState<"checking" | "ready" | "offline">("checking");
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [incidentRun, setIncidentRun] = useState<IncidentRun | null>(null);
   const [incidentBusy, setIncidentBusy] = useState(false);
   const [reservation, setReservation] = useState<Reservation | null>(null);
+  const [reservationBusy, setReservationBusy] = useState(false);
+  const [cancellationBusy, setCancellationBusy] = useState(false);
   const [leadCandidate, setLeadCandidate] = useState<LongRentalCandidate | null>(null);
+  const [leadBusy, setLeadBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const actionKeys = useRef<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
-    fetch(API_BASE + "/health")
-      .then((response) => {
-        if (!response.ok) throw new Error("health check failed");
-        if (active) setApiState("ready");
+    Promise.all([
+      fetch(API_BASE + "/health"),
+      fetch(API_BASE + "/api/customer-service/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: "usr_demo_001" }),
+      }),
+    ])
+      .then(async ([health, session]) => {
+        if (!health.ok || !session.ok) throw new Error("session setup failed");
+        const body = (await session.json()) as { session_id: string };
+        if (active) {
+          setApiState("ready");
+          setSessionId(body.session_id);
+        }
       })
       .catch(() => {
         if (active) setApiState("offline");
@@ -213,6 +229,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
+          session_id: sessionId || undefined,
           origin: context.origin || undefined,
           destination: context.destination || undefined,
           location: context.location || undefined,
@@ -244,13 +261,16 @@ export default function Home() {
   }
 
   async function startIncident(nextAction: NonNullable<CustomerResult["next_action"]>) {
+    if (incidentBusy || incidentRun || actionKeys.current.incident) return;
     setIncidentBusy(true);
+    const idempotencyKey = operationKey("incident");
+    actionKeys.current.incident = idempotencyKey;
     setToast(null);
     try {
       const response = await fetch(API_BASE + nextAction.endpoint, {
         method: nextAction.method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...nextAction.payload, idempotency_key: operationKey("incident") }),
+        body: JSON.stringify({ ...nextAction.payload, idempotency_key: idempotencyKey }),
       });
       if (!response.ok) throw new Error("事故处理流程暂时无法创建");
       setIncidentRun((await response.json()) as IncidentRun);
@@ -280,23 +300,34 @@ export default function Home() {
   }
 
   async function reserveVehicle(vehicle: Vehicle) {
+    if (reservationBusy) return;
+    setReservationBusy(true);
+    const operation = "reserve:" + vehicle.vehicle_id;
+    const idempotencyKey = actionKeys.current[operation] ?? operationKey("reserve");
+    actionKeys.current[operation] = idempotencyKey;
     setToast(null);
     try {
       const response = await fetch(API_BASE + "/api/pretrip/reserve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: "usr_demo_001", vehicle_id: vehicle.vehicle_id, idempotency_key: operationKey("reserve") }),
+        body: JSON.stringify({ user_id: "usr_demo_001", vehicle_id: vehicle.vehicle_id, idempotency_key: idempotencyKey }),
       });
       if (!response.ok) throw new Error("这辆车刚刚被其他用户预约了");
       setReservation((await response.json()) as Reservation);
       setToast("已为你保留这辆车。出发前如改变计划，可以在这里取消预约。");
     } catch (reason) {
       setToast(reason instanceof Error ? reason.message : "暂时无法预约");
+    } finally {
+      setReservationBusy(false);
     }
   }
 
   async function cancelReservation() {
-    if (!reservation) return;
+    if (!reservation || cancellationBusy) return;
+    setCancellationBusy(true);
+    const operation = "cancel:" + reservation.reservation_id;
+    const idempotencyKey = actionKeys.current[operation] ?? operationKey("cancel");
+    actionKeys.current[operation] = idempotencyKey;
     setToast(null);
     try {
       const response = await fetch(API_BASE + "/api/pretrip/reservations/" + reservation.reservation_id + "/cancel", {
@@ -304,7 +335,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           user_id: "usr_demo_001",
-          idempotency_key: operationKey("cancel"),
+          idempotency_key: idempotencyKey,
           approval_reference: "customer-confirmed-" + Date.now(),
         }),
       });
@@ -314,11 +345,17 @@ export default function Home() {
       setToast("预约已取消，车辆已恢复为可用状态。");
     } catch (reason) {
       setToast(reason instanceof Error ? reason.message : "暂时无法取消预约");
+    } finally {
+      setCancellationBusy(false);
     }
   }
 
   async function createRentalLead() {
-    if (!leadCandidate) return;
+    if (!leadCandidate || leadBusy) return;
+    setLeadBusy(true);
+    const operation = "rental:" + leadCandidate.listing_id;
+    const idempotencyKey = actionKeys.current[operation] ?? operationKey("rental");
+    actionKeys.current[operation] = idempotencyKey;
     setToast(null);
     try {
       const response = await fetch(API_BASE + "/api/long-rental/leads", {
@@ -329,7 +366,7 @@ export default function Home() {
           listing_id: leadCandidate.listing_id,
           duration_days: leadCandidate.duration_days,
           start_date: "2026-09-01",
-          idempotency_key: operationKey("rental"),
+          idempotency_key: idempotencyKey,
           approval_reference: "customer-confirmed-" + Date.now(),
         }),
       });
@@ -338,6 +375,8 @@ export default function Home() {
       setToast("长租意向已登记，客服会依据当前方案跟进；这不会生成支付或租赁订单。");
     } catch (reason) {
       setToast(reason instanceof Error ? reason.message : "暂时无法提交长租意向");
+    } finally {
+      setLeadBusy(false);
     }
   }
 
@@ -376,7 +415,7 @@ export default function Home() {
               <p className="overline">CONVERSATION</p>
               <h2>今天想去哪里？</h2>
             </div>
-            <span className="quietBadge">仅在需要时请求确认</span>
+            <span className="quietBadge">{sessionId ? "会话持续中" : "正在准备会话"}</span>
           </div>
 
           <div className="messages">
@@ -389,6 +428,7 @@ export default function Home() {
                     <AnswerDetails
                       result={item.result}
                       onReserve={reserveVehicle}
+                      reserveBusy={reservationBusy}
                       onIncident={startIncident}
                       onSelectLead={setLeadCandidate}
                     />
@@ -438,7 +478,7 @@ export default function Home() {
               <p className="overline">VEHICLE HOLD</p>
               <b>{reservation.status === "cancelled" ? "预约已取消" : "车辆已为你保留"}</b>
               <small>{reservation.vehicle_id} · {reservation.vehicle_status === "available" ? "已恢复可用" : reservation.status}</small>
-              {reservation.status !== "cancelled" && <button className="textAction" onClick={cancelReservation}>取消预约</button>}
+              {reservation.status !== "cancelled" && <button className="textAction" disabled={cancellationBusy} onClick={cancelReservation}>{cancellationBusy ? "正在取消…" : "取消预约"}</button>}
             </section>
           )}
           <section className="safetyNote">
@@ -457,7 +497,7 @@ export default function Home() {
           </div>
           <div className="confirmationActions">
             <button className="secondaryButton" onClick={() => setLeadCandidate(null)}>再想想</button>
-            <button className="primaryButton" onClick={createRentalLead}>确认意向</button>
+            <button className="primaryButton" disabled={leadBusy} onClick={createRentalLead}>{leadBusy ? "正在提交…" : "确认意向"}</button>
           </div>
         </section>
       )}
@@ -476,11 +516,13 @@ export default function Home() {
 function AnswerDetails({
   result,
   onReserve,
+  reserveBusy,
   onIncident,
   onSelectLead,
 }: {
   result: CustomerResult;
   onReserve: (vehicle: Vehicle) => void;
+  reserveBusy: boolean;
   onIncident: (action: NonNullable<CustomerResult["next_action"]>) => void;
   onSelectLead: (candidate: LongRentalCandidate) => void;
 }) {
@@ -506,7 +548,7 @@ function AnswerDetails({
             <article key={vehicle.vehicle_id}>
               <span className="bikeGlyph">◒</span>
               <div><b>{vehicle.model}</b><small>{vehicle.current_location} · 电量 {vehicle.battery_percent}%</small></div>
-              <button onClick={() => onReserve(vehicle)}>预约</button>
+              <button disabled={reserveBusy} onClick={() => onReserve(vehicle)}>{reserveBusy ? "处理中" : "预约"}</button>
             </article>
           ))}
         </div>

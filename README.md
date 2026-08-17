@@ -153,9 +153,10 @@ POST /api/runs/{run_id}/resume
 
 ```text
 POST /api/customer-service/query
+POST /api/customer-service/sessions
 ```
 
-只读查询不触发审批；Supervisor 会返回 `delegated_agents`，并按问题分派路线/费用/车辆、政策、长租或事故分诊能力。路线结果标注 `amap_mcp` 或合成回退来源，费用结果标注 RideOps 计价来源，政策结果返回 RAG 证据。出发地、目的地或当前位置缺失时返回 `missing_fields`，不会猜测用户条件。多 Agent 的职责边界见 [docs/multi-agent.md](docs/multi-agent.md)。
+只读查询不触发审批；前端为每位演示用户创建 SQLite 持久化客服会话，后续追问会自动合并已确认的上下文。Supervisor 会返回 `delegated_agents`，并按问题分派路线/费用/车辆、政策、长租或事故分诊能力。路线结果标注 `amap_mcp` 或合成回退来源，费用结果标注 RideOps 计价来源，政策结果返回 RAG 证据。出发地、目的地或当前位置缺失时返回 `missing_fields`，不会猜测用户条件。多 Agent 的职责边界见 [docs/multi-agent.md](docs/multi-agent.md)，模型 API 与会话预留说明见 [docs/agent-api-reservation.md](docs/agent-api-reservation.md)。
 
 当事故信息不完整时，`provide-info` 会将用户补充的信息写回当前 Run，并重新进入准备阶段；只有进入人工审批后，`resume` 才会执行写操作。Run 事件保存在 SQLite 的 `run_events` 表中，当前以 JSON 接口提供，后续可在不改变业务事件模型的情况下接入 SSE。
 
@@ -202,4 +203,4 @@ rideops-mcp
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读；以确定性 Supervisor 协同出行前、政策、长租和事故分诊 Agent，同时补充预约创建/取消、MCP 路线查询、统一客服查询、长租库存/价格规划与确认线索和费用预估接口；使用 pytest 覆盖 62 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、中文 BM25、Mock Vector、RRF 融合和可选 Embedding Adapter，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现缺失信息补交、审批前禁止写入、批准后幂等执行、运行事件审计及订单/车辆/工单状态回读；以确定性 Supervisor 协同出行前、政策、长租和事故分诊 Agent，并支持 SQLite 持久化客服多轮会话；补充预约创建/取消、MCP 路线查询、统一客服查询、长租库存/价格规划与确认线索和费用预估接口；使用 pytest 覆盖 65 个测试场景。

@@ -93,6 +93,22 @@ class SQLiteBusinessRepository:
                     run_id TEXT NOT NULL UNIQUE,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS customer_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    context_json TEXT NOT NULL,
+                    active_scenario TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS customer_messages (
+                    message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS run_events (
                     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     run_id TEXT NOT NULL,
@@ -368,6 +384,44 @@ class SQLiteBusinessRepository:
         with self._connect() as connection:
             row = connection.execute("SELECT state_json FROM workflow_runs WHERE run_id = ?", (run_id,)).fetchone()
             return json.loads(row["state_json"]) if row else None
+
+    def create_customer_session(self, user_id: str) -> dict:
+        session_id = f"session_{uuid.uuid4().hex[:12]}"
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO customer_sessions VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, user_id, "{}", None, now, now),
+            )
+        return {"session_id": session_id, "user_id": user_id, "active_scenario": None, "created_at": now}
+
+    def get_customer_session(self, session_id: str) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM customer_sessions WHERE session_id = ?", (session_id,)).fetchone()
+        if row is None:
+            return None
+        return {
+            "session_id": row["session_id"],
+            "user_id": row["user_id"],
+            "context": json.loads(row["context_json"]),
+            "active_scenario": row["active_scenario"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def update_customer_session(self, session_id: str, context: dict, active_scenario: str | None) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE customer_sessions SET context_json = ?, active_scenario = ?, updated_at = ? WHERE session_id = ?",
+                (json.dumps(context, ensure_ascii=False), active_scenario, datetime.now(timezone.utc).isoformat(), session_id),
+            )
+
+    def append_customer_message(self, session_id: str, role: str, content: str, payload: dict | None = None) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO customer_messages(session_id, role, content, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                (session_id, role, content, json.dumps(payload or {}, ensure_ascii=False, default=str), datetime.now(timezone.utc).isoformat()),
+            )
 
     def append_event(self, run_id: str, event_type: str, payload: dict | None = None) -> dict:
         event = {"event_id": None, "run_id": run_id, "event_type": event_type, "payload": payload or {}, "created_at": datetime.now(timezone.utc).isoformat()}

@@ -7,6 +7,15 @@ def test_health(client):
     assert response.json()["status"] == "ok"
 
 
+def test_agent_model_api_boundary_is_reserved_but_disabled_by_default(client):
+    response = client.get("/api/agent-model/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "disabled"
+    assert body["configured"] is False
+    assert body["enabled"] is False
+
+
 def test_skill_list_has_two_skills(client):
     response = client.get("/api/skills")
     assert response.status_code == 200
