@@ -180,6 +180,8 @@ POST /api/long-rental/leads
 
 当前 MVP 使用普通 HTTP 请求，不使用 SSE；使用 SQLite 保存业务状态和 Run 状态，不引入 Redis。高德路线调用通过 MCP Client 访问官方地图 MCP，订单、预约、事故工单等 RideOps 私有业务仍由本项目自己的 Service 和 Repository 负责。
 
+可按 [MVP 后端演示步骤](docs/mvp-demo.md) 依次演示出行前、事故中和长租咨询的完整闭环。
+
 ## RideOps 自有 MCP
 
 自有 MCP Server 已提供 12 个共享出行客服工具，包含订单、车辆、路线/费用、政策检索和事故、预约、长租留资写操作。启动方式：
