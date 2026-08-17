@@ -50,7 +50,7 @@ python evals/run_rag_eval.py --output evals/mock-baseline.json
 
 这些数字仅用于后续比较 Mock、BM25、Vector、Hybrid+RRF 和 Reranker 版本，不代表生产能力，也不作为简历指标。
 
-当前尚未实现：MCP、LangGraph、HITL checkpoint、可靠执行、SSE，以及真实模型或企业系统连接。RAG 当前使用本地 Mock 模式；前端中的相关流程仍是确定性演示状态机。
+当前已增加事故处理 MVP：SQLite 持久化、普通业务工具、简单 LangGraph 准备/执行图、审批前暂停、批准后写入、结果回读和前端真实 Run 状态展示。当前尚未实现：FastMCP、LangGraph Checkpoint、复杂可靠性策略、SSE，以及真实模型或企业系统连接。RAG 仍使用本地 Mock 模式。
 
 ## 目录结构
 
@@ -61,6 +61,8 @@ backend/
     api/                     # FastAPI 接口
     domain/                  # Pydantic 领域模型
     repositories/            # 合成数据仓库
+    services/                # 普通业务工具
+    agents/                  # 简单 LangGraph 事故流程
     skills/                  # Registry 与 Router
     rag/                     # 文档、Chunk、Embedding、Hybrid Search
 skills/                     # 可按需加载的 SKILL.md
@@ -104,10 +106,36 @@ curl -X POST http://127.0.0.1:8000/api/rag/search \
 
 返回的每条证据包含 `document_id`、`title`、`section`、`content`、`score` 和 `source`。没有足够证据时返回 `answerable: false`，不会强行生成答案。
 
+## 事故 MVP 闭环
+
+前端默认创建一条合成事故 Run，后端执行：
+
+```text
+用户报事故
+→ Skill 路由
+→ Mock RAG 返回政策证据
+→ SQLite 查询活动订单
+→ 缺字段时返回追问
+→ 生成三个待审批写动作
+→ 人工批准或拒绝
+→ 普通业务工具写入 SQLite
+→ 只读工具回读订单、车辆和工单状态
+```
+
+当前 Run 接口：
+
+```text
+POST /api/runs
+GET  /api/runs/{run_id}
+POST /api/runs/{run_id}/resume
+```
+
+当前 MVP 使用普通 HTTP 请求，不使用 SSE；使用 SQLite 保存业务状态和 Run 状态，不引入 Redis。
+
 ## 下一阶段
 
-下一轮先升级真实 RAG：保留统一接口，增加真实 Embedding Adapter、持久化向量索引、BM25 和 RRF 融合；完成评估对比后，再进入持久化业务数据库和 MCP。
+下一轮先固定出行前场景的接口边界，再升级真实 RAG：增加真实 Embedding Adapter、中文 BM25、持久化向量索引和 RRF 融合；完成评估对比后，再进入 FastMCP、PostgreSQL、SSE 断线恢复等加分项。
 
 ## 简历表述（基于当前代码）
 
-搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；设计可扩展的 Skill Registry 与关键词路由器，实现 Skill 元数据启动扫描、命中后的渐进式 `SKILL.md` 加载；进一步实现本地 Mock 优先的 RAG 检索链路，支持 Markdown 政策解析、Hybrid Search、可替换 Embedding 接口、证据引用和无证据拒答，并使用 pytest 覆盖 27 个测试场景。
+搭建 RideOps Agent 的 FastAPI 后端基础，使用 Pydantic 建模订单、车辆、库存和事故工单等业务实体；实现 Skill Registry 渐进式加载、本地 Mock RAG 证据检索，并基于 SQLite、普通业务工具和 LangGraph 构建事故处理 MVP，实现审批前禁止写入、批准后幂等执行及订单/车辆/工单状态回读；使用 pytest 覆盖 34 个测试场景。

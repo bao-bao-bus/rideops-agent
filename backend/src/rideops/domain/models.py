@@ -34,6 +34,7 @@ class Order(DomainModel):
     status: OrderStatus
     started_at: datetime
     pickup_location: str
+    billing_status: str = "active"
 
 
 class Vehicle(DomainModel):
@@ -60,3 +61,30 @@ class IncidentTicket(DomainModel):
     description: str
     status: TicketStatus
     created_at: datetime
+
+
+class IncidentRunRequest(DomainModel):
+    user_id: str = "usr_demo_001"
+    message: str = Field(min_length=1)
+    order_id: str | None = None
+    vehicle_id: str | None = None
+    location: str | None = None
+    description: str | None = None
+
+
+class ResumeRequest(DomainModel):
+    approved: bool
+
+
+class RunResponse(DomainModel):
+    run_id: str
+    workflow_status: str
+    selected_skill: str | None = None
+    collected_fields: dict[str, str | None] = Field(default_factory=dict)
+    missing_fields: list[str] = Field(default_factory=list)
+    evidence: list[dict] = Field(default_factory=list)
+    planned_actions: list[dict] = Field(default_factory=list)
+    approval: str = "not_required"
+    action_results: list[dict] = Field(default_factory=list)
+    final_state: dict = Field(default_factory=dict)
+    message: str

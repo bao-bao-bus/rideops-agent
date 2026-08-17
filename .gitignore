@@ -5,3 +5,6 @@ node_modules/
 *.log
 __pycache__/
 .pytest_cache/
+data/
+*.egg-info/
+next-env.d.ts
